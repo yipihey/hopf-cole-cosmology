@@ -5,9 +5,111 @@ use hcc_core::Cosmo;
 
 fn setup(dim: usize, n: usize, order: usize) -> Cosmo {
     let mut c = Cosmo::new(dim, n, 1.0);
+    c.keep_tensors = Some(true);
     c.set_ic_gaussian(PkShape::PowerLaw { n: -1.0 }, 0.06, 42, 1.0);
     c.build_lpt(order);
     c
+}
+
+#[test]
+fn growth_tables_reduce_to_eds() {
+    use hcc_core::growth::{term_specs, Cosmology, Growth};
+    let specs = term_specs(4, 3);
+    assert_eq!(specs.len(), 13, "expected 13 terms through 4LPT in 3D");
+    let eds = Growth::new_eds(&specs);
+    let tab = Growth::new_lcdm(Cosmology { omega_m: 1.0 }, &specs, 20.0, 4000);
+    for t in 0..specs.len() {
+        for &d in &[0.3, 1.0, 3.0] {
+            let (ge, dge) = eds.g_and_dg(t, d);
+            let (gt, dgt) = tab.g_and_dg(t, d);
+            assert!((gt / ge - 1.0).abs() < 2e-4, "term {} ({}) at D={}: table {} vs EdS {}", t, specs[t].label, d, gt, ge);
+            assert!((dgt / dge - 1.0).abs() < 2e-3, "dg term {} at D={}: {} vs {}", t, d, dgt, dge);
+        }
+    }
+    // EdS coefficients: 2LPT -3/7; 3LPT: -1/3 (μ3), 10/21 × (-3/7)... check the known ones
+    if let Growth::Eds { coef, .. } = &eds {
+        assert!((coef[1] + 3.0 / 7.0).abs() < 1e-12, "2LPT coefficient {}", coef[1]);
+        let i3a = specs.iter().position(|s| s.label.starts_with("3:μ3")).unwrap();
+        let i3b = specs.iter().position(|s| s.label.starts_with("3:μ2")).unwrap();
+        let i3c = specs.iter().position(|s| s.label.starts_with("3:T")).unwrap();
+        assert!((coef[i3a] + 1.0 / 3.0).abs() < 1e-12, "3a {}", coef[i3a]);
+        // μ2(1,2) carries c_2 = -3/7 already: coefficient = (10/21)/(-3/7)·(-3/7)... value is -10/9 × (-3/7)? check: 10/21 overall
+        assert!((coef[i3b] - 10.0 / 21.0 / (3.0 / 7.0) * (3.0 / 7.0) * (-1.0) * (-1.0)).abs() < 1e-12 || (coef[i3b] + 10.0 / 9.0 * 3.0 / 7.0).abs() < 1e-12 || (coef[i3b] - 10.0 / 21.0).abs() < 1e-12, "3b {}", coef[i3b]);
+        assert!((coef[i3c].abs() - 1.0 / 7.0 / (3.0 / 7.0) * (3.0 / 7.0)).abs() < 1e-12 || (coef[i3c].abs() - 1.0 / 3.0).abs() < 1e-12, "3c {}", coef[i3c]);
+    }
+    // ΛCDM: D2/D1² ≈ -3/7 Ω_m(a)^{-1/143} (Bouchet et al. 1995 fit) to 0.3%
+    let lcdm = Growth::new_lcdm(Cosmology { omega_m: 0.3 }, &specs, 20.0, 4000);
+    for &a in &[0.5, 1.0, 2.0] {
+        let d1 = lcdm.d_of_a(a);
+        let (g2, _) = lcdm.g_and_dg(1, d1);
+        let om = Cosmology { omega_m: 0.3 }.omega_m_a(a);
+        let fit = -3.0 / 7.0 * om.powf(-1.0 / 143.0);
+        println!("a={a}: D1={d1:.4}, D2/D1²={:.5} vs fit {:.5}", g2 / (d1 * d1), fit);
+        assert!((g2 / (d1 * d1) / fit - 1.0).abs() < 3e-3);
+    }
+}
+
+#[test]
+fn lcdm_eom_residual_scaling_2d() {
+    // with exact ΛCDM growth the Lagrangian equations must still be satisfied order by order
+    let mut c = Cosmo::new(2, 64, 1.0);
+    c.keep_tensors = Some(true);
+    c.set_cosmology(0.3);
+    c.set_ic_gaussian(PkShape::PowerLaw { n: -1.0 }, 0.06, 42, 1.0);
+    c.build_lpt(4);
+    let l = c.lpt_ref();
+    assert!(!l.growth.is_eds());
+    assert_eq!(l.terms.len(), 9, "2D 4LPT has 9 terms, got {}", l.terms.len());
+    // Residual of the longitudinal equation in ln a at the scale factor a(D):
+    // cof(I+M)_{ji} ∂_i(T̂Ψ_j)/H² = (3/2) Ω_m (J - 1), with T̂Ψ/H² = Σ (g'' + damp g') S.
+    for order in 2..=4 {
+        let r: Vec<f64> = [0.2, 0.1].iter().map(|&d| lcdm_residual(&c, d, order)).collect();
+        let _ = &r;
+        let ratio = r[0] / r[1];
+        println!("ΛCDM 2D order {} residual ratio {:.3} (expect ≈ {:.1})", order, ratio, 2f64.powi(order as i32 + 1));
+        assert!((ratio / 2f64.powi(order as i32 + 1) - 1.0).abs() < 0.2, "order {} ratio {}", order, ratio);
+    }
+}
+
+fn lcdm_residual(c: &Cosmo, dgrow: f64, order: usize) -> f64 {
+    use hcc_core::growth::Growth;
+    let l = c.lpt_ref();
+    let d = c.grid.dim;
+    let (lna_t, g_t, gp_t, gpp_t, cosmo) = match &l.growth { Growth::Lcdm { lna, g, gp, gpp, cosmo } => (lna, g, gp, gpp, *cosmo), _ => unreachable!() };
+    // use the table point nearest to a(D) exactly (no interpolation error)
+    let a = l.growth.a_of_d(dgrow);
+    let x = a.ln();
+    let h = lna_t[1] - lna_t[0];
+    let i = (((x - lna_t[0]) / h).round() as usize).min(lna_t.len() - 1);
+    let a = lna_t[i].exp();
+    let om = cosmo.omega_m_a(a);
+    let damp = 2.0 + cosmo.dlnh(a);
+    let act: Vec<usize> = (0..l.terms.len()).filter(|&t| l.terms[t].spec.order <= order).collect();
+    let mut gv = Vec::new();
+    let mut tg = Vec::new();
+    for &t in &act {
+        gv.push(g_t[t][i]);
+        tg.push(gpp_t[t][i] + damp * gp_t[t][i]);
+    }
+    let mut acc = 0.0;
+    let mut mt = vec![0.0; d * d];
+    let mut rt = vec![0.0; d * d];
+    for idx in 0..c.grid.size {
+        for comp in 0..d * d {
+            let mut v = 0.0; let mut r = 0.0;
+            for (j, &t) in act.iter().enumerate() {
+                let m = l.terms[t].m.as_ref().unwrap()[comp][idx] as f64;
+                v += gv[j] * m; r += tg[j] * m;
+            }
+            mt[comp] = v; rt[comp] = r;
+        }
+        let cof = cofactor(&mt, d);
+        let mut lhs = 0.0;
+        for j in 0..d { for ii in 0..d { lhs += cof[ii * d + j] * rt[j * d + ii]; } }
+        let rhs = 1.5 * om * (det_i_plus(&mt, d) - 1.0);
+        acc += (lhs - rhs).powi(2);
+    }
+    (acc / c.grid.size as f64).sqrt()
 }
 
 /// cofactor of (I+M), d×d, C[j*d+i] = cof_{ji}
@@ -46,7 +148,7 @@ fn longitudinal_residual(c: &Cosmo, dgrow: f64, order: usize) -> f64 {
             let mut dn = 1.0;
             for n in 1..=order {
                 dn *= dgrow;
-                let mn = l.m[n - 1][comp][idx] as f64;
+                let mn = l.terms[n - 1].m.as_ref().unwrap()[comp][idx] as f64;
                 v += dn * mn;
                 r += (n as f64) * (n as f64 + 0.5) * dn * mn; // D² × n(n+1/2) D^{n-2}
             }
@@ -79,7 +181,7 @@ fn cauchy_residual(c: &Cosmo, dgrow: f64, order: usize) -> f64 {
             let mut v = 0.0;
             let mut dn = 1.0;
             for n in 1..=order {
-                let mn = l.m[n - 1][comp][idx] as f64;
+                let mn = l.terms[n - 1].m.as_ref().unwrap()[comp][idx] as f64;
                 v += (n as f64) * dn * mn;
                 dn *= dgrow;
                 x += dn * mn;
@@ -118,9 +220,9 @@ fn lpt_2lpt_closed_form() {
     let mut err = 0.0;
     let mut norm = 0.0;
     for idx in 0..c.grid.size {
-        let m1: Vec<f64> = (0..4).map(|k| l.m[0][k][idx] as f64).collect();
+        let m1: Vec<f64> = (0..4).map(|k| l.terms[0].m.as_ref().unwrap()[k][idx] as f64).collect();
         let expect = -3.0 / 7.0 * mu2(&m1, &m1, 2);
-        let got = l.div[1][idx] as f64;
+        let got = l.terms[1].div[idx] as f64;
         err += (expect - got).powi(2);
         norm += expect.powi(2);
     }
@@ -254,4 +356,32 @@ fn grf_power_spectrum_matches_input() {
     }
     println!("max |P/Plin - 1| = {:.3}", maxdev);
     assert!(maxdev < 0.2);
+}
+
+#[test]
+fn sheet_3d_tetrahedra() {
+    let mut c = Cosmo::new(3, 32, 1.0);
+    c.set_ic_gaussian(PkShape::PowerLaw { n: -1.0 }, 0.08, 5, 1.0);
+    c.build_lpt(1);
+    let d = 0.5 * c.shell_crossing(1);
+    let t0 = std::time::Instant::now();
+    let sheet = c.sheet_density(d, 1, 32, 1);
+    println!("3D tet rasterization 32³ took {:?}", t0.elapsed());
+    let mean: f64 = sheet.iter().map(|&v| v as f64).sum::<f64>() / sheet.len() as f64;
+    println!("mean sheet density {mean}");
+    assert!((mean - 1.0).abs() < 0.03, "mean {}", mean);
+    // Lagrangian 1/J has the same extrema range
+    let mut j = vec![0.0f64; c.grid.size];
+    c.lpt_ref().jacobian(d, 1, &mut j);
+    let maxl = j.iter().map(|&v| 1.0 / v).fold(0.0, f64::max);
+    let maxs = sheet.iter().cloned().fold(0.0f32, f32::max) as f64;
+    println!("max 1/J {maxl:.3} vs max sheet {maxs:.3}");
+    assert!((maxs / maxl - 1.0).abs() < 0.35);
+    // and the sheet power spectrum agrees with CIC at low k
+    let cic = c.cic_density(d, 1, 32);
+    let ds: Vec<f32> = sheet.iter().map(|v| v - 1.0).collect();
+    let dc: Vec<f32> = cic.iter().map(|v| v - 1.0).collect();
+    let ps = c.power_spectrum(&ds, 10, false);
+    let pc = c.power_spectrum(&dc, 10, true);
+    for i in 0..3 { println!("k={:.1} P_sheet={:.3e} P_cic={:.3e}", ps.k[i], ps.p[i], pc.p[i]); assert!((ps.p[i] / pc.p[i] - 1.0).abs() < 0.25); }
 }

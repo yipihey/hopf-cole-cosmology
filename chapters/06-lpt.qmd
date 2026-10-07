@@ -14,10 +14,12 @@ $$
 $$ {#eq-lpt-series}
 
 where $\boldsymbol\Psi^{(1)} = -\nabla\varphi$ is the Zel'dovich term. The
-$D^n$ time dependence is exact in an Einstein–de Sitter universe and an
-excellent approximation otherwise (the exact $\Lambda$CDM growth functions
-differ from $D^n$ by at most a few per cent, which is why the laboratory uses
-the EdS form; DISCO-DJ and similar codes offer both).
+$D^n$ time dependence is exact in an Einstein–de Sitter universe. In
+$\Lambda$CDM every term of the series obeys its own forced growth equation
+(see below), and the laboratory solves these exactly; the differences from
+$D^n$ are at the percent level (for example
+$D_2/D_1^2 = -\tfrac37\,\Omega_m(a)^{-1/143}$ to better than $0.3\%$,
+@bouchet1995), which is why the EdS form is such a good approximation.
 
 ## The equations in Lagrangian form
 
@@ -79,6 +81,31 @@ Fourier space: $\hat{\boldsymbol\Psi} = -i\mathbf k\,\hat S/k^2 + i\mathbf k\tim
   $D^{n+1}$ and $D^{n}$ respectively for $n = 1,\dots,4$, in both 2D and 3D.
 :::
 
+### Exact time dependence in $\Lambda$CDM
+
+Write each term of the series as a spatial field times a time function,
+$\boldsymbol\Psi = \sum_\tau g_\tau(t)\,\mathbf S^\tau(\mathbf q)$, where
+$\mathbf S^\tau$ is sourced by a specific pair or triple of lower-order
+terms (for instance $\nabla\cdot\mathbf S = \mu_2(\mathbf S^\sigma,\mathbf S^\rho)$).
+With $\mathcal T g = \ddot g + 2H\dot g$, the longitudinal equation
+@eq-lpt-long for the term sourced by the pair $\{\sigma,\rho\}$ reads
+
+$$
+\mathcal T g_\tau - \tfrac32\Omega_m H^2 g_\tau =
+\sum_{(\sigma,\rho)} \Big[\tfrac32\Omega_m H^2\, g_\sigma g_\rho - 2\, g_\sigma\,\mathcal T g_\rho\Big],
+$$ {#eq-lpt-growth}
+
+summed over the orderings of the pair (triples carry a factor 3 instead of
+2), while a transverse term sourced by $\sigma\neq\rho$ has
+$h_{\sigma\rho} = -\int (\dot g_\sigma g_\rho - \dot g_\rho g_\sigma)\,dt$.
+In EdS these reproduce the coefficients of @eq-lpt-rec-long and
+@eq-lpt-rec-trans ($g_\tau \propto D^n$). In $\Lambda$CDM there are 13
+distinct time functions through fourth order (1, 1, 3 and 8 at orders one to
+four), integrated as one coupled system in $\ln a$ from deep in matter
+domination. The laboratory lets you choose $\Omega_m$; with $D$ still used as
+the clock, the scale factor $a(D)$ and $\Omega_m(a)$ are displayed, and $D$ is
+bounded by its asymptotic value in a $\Lambda$-dominated future.
+
 ### Two dimensions
 
 The laboratory's fast mode is two-dimensional. We treat it as a 3D universe
@@ -106,7 +133,10 @@ and its density is mass over current volume. The Eulerian density at a point
 is the *sum over all simplices covering it*: this is @eq-density-jacobian
 made discrete, multi-streaming included, with no free parameters and no
 shot noise. The laboratory renders the triangles on the GPU with additive
-blending, so you literally see the sheet fold.
+blending, so you literally see the sheet fold; in 3D it rasterizes the six
+Kuhn tetrahedra of every Lagrangian cell on the CPU (point-sampled at the
+Eulerian cell centres), which is the quantitative counterpart of the
+cloud-in-cell deposit.
 
 ```{=html}
 <div class="hcc-widget" data-widget="lptorders"></div>

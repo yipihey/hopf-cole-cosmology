@@ -23,10 +23,12 @@ to build intuition: drag $D$, change the smoothing scale, switch orders and
 compare with Hopf–Cole.
 
 **3D (quantitative).** Grids from $32^3$ to $128^3$ with the full 4LPT
-recursion ($\mu_3$ terms and all three curl components), cloud-in-cell
-densities with window deconvolution, slices and a volume rendering. Here
-the measured power spectra have enough modes per bin to compare with the
-one-loop predictions quantitatively.
+recursion ($\mu_3$ terms and all three curl components), tetrahedral sheet
+or cloud-in-cell densities (the latter with window deconvolution), slices and
+a volume rendering. Here the measured power spectra have enough modes per bin
+to compare with the one-loop predictions quantitatively. With WebGPU the
+per-time-step pipeline (positions, deposit, Hopf–Cole, FFTs) runs in compute
+shaders, so even $128^3$ follows the $D$ slider.
 
 ## Controls
 
@@ -36,11 +38,13 @@ one-loop predictions quantitatively.
 | | smoothing $R$ | Gaussian filter $e^{-k^2R^2/2}$ on $\delta_0$ (box units) |
 | | $\sigma_0$ | rms of the smoothed $\delta_0$; with $\sigma_0 = 1$ the growth factor $D$ equals the rms linear density contrast |
 | | seed | random phases |
+| Cosmology | $\Omega_m$ | flat $\Lambda$CDM; $\Omega_m = 1$ is Einstein–de Sitter with exact $D^n$ growth, otherwise all 13 growth functions through 4LPT are integrated numerically; $a(D)$ and $\Omega_m(a)$ are displayed |
 | Dynamics | $D$ | growth factor used as time; $D_{\rm sc}$ (first shell crossing of the chosen order) is displayed |
 | | LPT order | 1 (Zel'dovich) to 4 |
 | | $\nu$ | adhesion viscosity for the Hopf–Cole solver, in box units$^2$ |
 | | Hopf–Cole method | Fourier multiplier (shows the dynamic-range failure) or log-domain kernel with 1–4× refinement |
-| Views | field | sheet density, CIC density, Hopf–Cole density, linear density, velocity potential, $\ln\psi$, Jacobian, LPT sources |
+| Views | field | sheet density (triangles in 2D, tetrahedra in 3D), CIC density, Hopf–Cole density, linear density, velocity potential, $\ln\psi$, Jacobian, LPT sources |
+| | GPU compute (3D) | runs positions, CIC deposit, Hopf–Cole and the FFTs on the GPU (WebGPU compute shaders) so that $128^3$ responds live to the $D$ slider |
 | | Fourier | $\log|\hat\delta(\mathbf k)|$ and phase maps of the selected field, $\log|\hat\psi(\mathbf k)|$ |
 | Statistics | $P(k)$ | measured for sheet / CIC / Hopf–Cole / linear, with 1-loop SPT and ZA predictions |
 | | $r(k)$ | cross-correlation with the linear field |

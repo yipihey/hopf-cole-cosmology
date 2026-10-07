@@ -60,20 +60,51 @@ impl CosmoSim {
     fn ok_order(&self, order: usize) -> bool { order >= 1 && order <= self.inner.built_order() }
     pub fn positions(&self, d: f64, order: usize) -> Vec<f32> { if !self.ok_order(1) { return vec![]; } self.inner.positions(d, order) }
     pub fn velocities(&self, d: f64, order: usize) -> Vec<f32> { if !self.ok_order(1) { return vec![]; } self.inner.velocities(d, order) }
-    /// 2D only (returns the CIC density in 3D).
+    /// Phase-space sheet density: triangles in 2D, Kuhn tetrahedra in 3D.
     pub fn sheet_density(&self, d: f64, order: usize, ne: usize, ss: usize) -> Vec<f32> {
         if !self.ok_order(1) { return vec![]; }
-        if self.inner.grid.dim == 2 { self.inner.sheet_density(d, order, ne, ss) } else { self.inner.cic_density(d, order, ne) }
+        self.inner.sheet_density(d, order, ne, ss)
     }
     pub fn cic_density(&self, d: f64, order: usize, ne: usize) -> Vec<f32> { if !self.ok_order(1) { return vec![]; } self.inner.cic_density(d, order, ne) }
     pub fn linear_delta(&mut self, d: f64) -> Vec<f32> { self.inner.linear_delta(d) }
     pub fn phi0(&self) -> Vec<f32> { self.inner.phi0.iter().map(|&v| v as f32).collect() }
-    pub fn lpt_psi(&self, order: usize, comp: usize) -> Vec<f32> { if !self.ok_order(order) || comp >= self.inner.grid.dim { return vec![]; } self.inner.lpt_ref().psi[order - 1][comp].clone() }
-    pub fn lpt_div(&self, order: usize) -> Vec<f32> { if !self.ok_order(order) { return vec![]; } self.inner.lpt_ref().div[order - 1].clone() }
-    pub fn lpt_curl(&self, order: usize, comp: usize) -> Vec<f32> {
-        if !self.ok_order(order) { return vec![]; }
+    /// Displacement contribution of the given order at time d, one component:
+    /// Σ_{τ∈order} g_τ(d) S^τ_comp / d^order (shape field; equals Ψ^(order) in EdS).
+    pub fn lpt_psi(&self, order: usize, comp: usize) -> Vec<f32> {
+        if !self.ok_order(order) || comp >= self.inner.grid.dim { return vec![]; }
         let l = self.inner.lpt_ref();
-        if l.curl[order - 1].is_empty() || comp >= l.curl[order - 1].len() { vec![0.0; l.grid.size] } else { l.curl[order - 1][comp].clone() }
+        let mut out = vec![0.0f32; l.grid.size];
+        for (t, term) in l.terms.iter().enumerate() {
+            if term.spec.order != order { continue; }
+            let w = l.growth.g_and_dg(t, 1.0).0 as f32;
+            for idx in 0..l.grid.size { out[idx] += w * term.psi[comp][idx]; }
+        }
+        out
+    }
+    /// Longitudinal source of the given order (shape at D = 1; see Lpt::div_source).
+    pub fn lpt_div(&self, order: usize) -> Vec<f32> { if !self.ok_order(order) { return vec![]; } self.inner.lpt_ref().div_source(order, 1.0) }
+    pub fn lpt_curl(&self, order: usize, comp: usize) -> Vec<f32> { if !self.ok_order(order) { return vec![]; } self.inner.lpt_ref().curl_source(order, comp, 1.0) }
+    /// Flat ΛCDM cosmology (Ω_m = 1: Einstein–de Sitter, exact D^n growth).
+    pub fn set_cosmology(&mut self, omega_m: f64) { self.inner.set_cosmology(omega_m); }
+    pub fn omega_m(&self) -> f64 { self.inner.cosmo.omega_m }
+    /// Scale factor at linear growth factor d (= d in EdS; D normalized to a at early times).
+    pub fn a_of_d(&self, d: f64) -> f64 { self.inner.lpt.as_ref().map(|l| l.growth.a_of_d(d)).unwrap_or(d) }
+    pub fn d_of_a(&self, a: f64) -> f64 { self.inner.lpt.as_ref().map(|l| l.growth.d_of_a(a)).unwrap_or(a) }
+    /// Largest reachable D (∞ in EdS).
+    pub fn d_max(&self) -> f64 { self.inner.lpt.as_ref().map(|l| l.growth.d_max()).unwrap_or(f64::INFINITY) }
+    /// Growth-term bookkeeping: labels, and g_τ(d)/d^order for each term.
+    /// Raw spatial field S^τ (component) of term τ; positions = q + Σ_τ g_τ(D) S^τ with g from term_growth.
+    pub fn term_psi(&self, term: usize, comp: usize) -> Vec<f32> {
+        self.inner.lpt.as_ref().and_then(|l| l.terms.get(term).map(|t| t.psi[comp].clone())).unwrap_or_default()
+    }
+    /// g_τ(D) itself (not divided by D^n).
+    pub fn term_g(&self, d: f64) -> Vec<f64> {
+        self.inner.lpt.as_ref().map(|l| (0..l.terms.len()).map(|t| l.growth.g_and_dg(t, d).0).collect()).unwrap_or_default()
+    }
+    pub fn term_labels(&self) -> Vec<String> { self.inner.lpt.as_ref().map(|l| l.term_labels()).unwrap_or_default() }
+    pub fn term_orders(&self) -> Vec<u32> { self.inner.lpt.as_ref().map(|l| l.terms.iter().map(|t| t.spec.order as u32).collect()).unwrap_or_default() }
+    pub fn term_growth(&self, d: f64) -> Vec<f64> {
+        self.inner.lpt.as_ref().map(|l| (0..l.terms.len()).map(|t| l.growth.g_and_dg(t, d).0 / d.max(1e-12).powi(l.terms[t].spec.order as i32)).collect()).unwrap_or_default()
     }
     pub fn jacobian(&self, d: f64, order: usize) -> Vec<f32> {
         if !self.ok_order(1) { return vec![]; }

@@ -4,6 +4,7 @@
 pub mod burgers1d;
 pub mod fft;
 pub mod grid;
+pub mod growth;
 pub mod hopfcole;
 pub mod ics;
 pub mod lpt;
@@ -31,13 +32,16 @@ pub struct Cosmo {
     pub phi0: Vec<f64>,
     pub lpt: Option<Lpt>,
     pub sigma0: f64,
+    pub cosmo: growth::Cosmology,
+    /// Keep spectral gradient tensors of all LPT terms (memory heavy in 3D).
+    pub keep_tensors: Option<bool>,
 }
 
 impl Cosmo {
     pub fn new(dim: usize, n: usize, l: f64) -> Self {
         let grid = Grid::new(dim, n, l);
         let eng = FftEngine::new(&grid);
-        Cosmo { grid: grid.clone(), eng, pk: None, delta0_hat: vec![C64::new(0.0, 0.0); grid.size], phi0: vec![0.0; grid.size], lpt: None, sigma0: 0.0 }
+        Cosmo { grid: grid.clone(), eng, pk: None, delta0_hat: vec![C64::new(0.0, 0.0); grid.size], phi0: vec![0.0; grid.size], lpt: None, sigma0: 0.0, cosmo: growth::Cosmology::eds(), keep_tensors: None }
     }
 
     fn finish_ic(&mut self, target_sigma: f64) {
@@ -89,13 +93,21 @@ impl Cosmo {
         self.finish_ic(sigma);
     }
 
+    /// Set the cosmology (flat ΛCDM; Ω_m = 1 is EdS).  Invalidates the LPT fields.
+    pub fn set_cosmology(&mut self, omega_m: f64) {
+        let c = growth::Cosmology { omega_m: omega_m.clamp(0.05, 1.0) };
+        if c != self.cosmo { self.cosmo = c; self.lpt = None; }
+    }
+
     pub fn build_lpt(&mut self, order: usize) {
         let need = match &self.lpt {
-            Some(l) => l.order < order,
+            Some(l) => l.order < order || l.cosmo != self.cosmo,
             None => true,
         };
         if need {
-            self.lpt = Some(Lpt::new(&self.grid, &mut self.eng, &self.delta0_hat, order));
+            // keep the spectral gradient tensors in 2D (cheap); use FD Jacobians in 3D
+            let keep = self.keep_tensors.unwrap_or(self.grid.dim == 2);
+            self.lpt = Some(Lpt::new(&self.grid, &mut self.eng, &self.delta0_hat, order, self.cosmo, keep));
         }
     }
 
@@ -115,7 +127,7 @@ impl Cosmo {
     }
     pub fn sheet_density(&self, d: f64, order: usize, ne: usize, ss: usize) -> Vec<f32> {
         let pos = self.positions(d, order);
-        sheet::sheet_density_2d(&self.grid, &pos, ne, ss)
+        if self.grid.dim == 3 { sheet::sheet_density_3d(&self.grid, &pos, ne, ss) } else { sheet::sheet_density_2d(&self.grid, &pos, ne, ss) }
     }
     pub fn cic_density(&self, d: f64, order: usize, ne: usize) -> Vec<f32> {
         let pos = self.positions(d, order);

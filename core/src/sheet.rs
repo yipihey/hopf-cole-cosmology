@@ -136,3 +136,88 @@ pub fn cic_window(grid: &Grid, idx: usize) -> f64 {
     }
     w
 }
+
+/// 3D sheet density: each Lagrangian cube is split into 6 Kuhn tetrahedra of
+/// mass dq³/6; every Eulerian sample point inside a tetrahedron receives
+/// m/|V| (sum over streams).  `pos` interleaved (x,y,z), unwrapped.  Output
+/// ρ/ρ̄ on an `ne³` grid; `ss` = supersampling per axis.
+pub fn sheet_density_3d(grid: &Grid, pos: &[f32], ne: usize, ss: usize) -> Vec<f32> {
+    assert_eq!(grid.dim, 3);
+    let n = grid.n;
+    let l = grid.l;
+    let dxe = l / ne as f64;
+    let ss = ss.max(1);
+    let mut rho = vec![0.0f64; ne * ne * ne];
+    let mass = grid.dx().powi(3) / 6.0;
+    let wsub = 1.0 / (ss * ss * ss) as f64;
+    let get = |i: usize, j: usize, k: usize, off: [f64; 3]| -> [f64; 3] {
+        let idx = (((i % n) * n + (j % n)) * n + (k % n)) * 3;
+        [pos[idx] as f64 + off[0], pos[idx + 1] as f64 + off[1], pos[idx + 2] as f64 + off[2]]
+    };
+    // Kuhn (Freudenthal) decomposition of the unit cube along the main diagonal
+    const TETS: [[usize; 4]; 6] = [[0, 1, 3, 7], [0, 1, 5, 7], [0, 2, 3, 7], [0, 2, 6, 7], [0, 4, 5, 7], [0, 4, 6, 7]];
+    for i in 0..n {
+        let oi = if i + 1 == n { l } else { 0.0 };
+        for j in 0..n {
+            let oj = if j + 1 == n { l } else { 0.0 };
+            for k in 0..n {
+                let ok = if k + 1 == n { l } else { 0.0 };
+                // cube corners indexed by bits (x,y,z)
+                let mut c = [[0.0f64; 3]; 8];
+                for b in 0..8 {
+                    let (bx, by, bz) = (b & 1, (b >> 1) & 1, (b >> 2) & 1);
+                    c[b] = get(i + bx, j + by, k + bz, [if bx == 1 { oi } else { 0.0 }, if by == 1 { oj } else { 0.0 }, if bz == 1 { ok } else { 0.0 }]);
+                }
+                for t in TETS.iter() {
+                    rasterize_tet(&[c[t[0]], c[t[1]], c[t[2]], c[t[3]]], mass, ne, dxe, ss, wsub, &mut rho);
+                }
+            }
+        }
+    }
+    rho.iter().map(|&v| v as f32).collect()
+}
+
+fn rasterize_tet(p: &[[f64; 3]; 4], mass: f64, ne: usize, dxe: f64, ss: usize, wsub: f64, rho: &mut [f64]) {
+    // signed volume ×6
+    let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+    let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+    let e3 = [p[3][0] - p[0][0], p[3][1] - p[0][1], p[3][2] - p[0][2]];
+    let det = e1[0] * (e2[1] * e3[2] - e2[2] * e3[1]) - e1[1] * (e2[0] * e3[2] - e2[2] * e3[0]) + e1[2] * (e2[0] * e3[1] - e2[1] * e3[0]);
+    if det.abs() < 1e-300 { return; }
+    let dens = mass / (det.abs() / 6.0);
+    let inv = 1.0 / det;
+    // inverse of the edge matrix (columns e1,e2,e3) for barycentric coordinates
+    let m = [
+        [(e2[1] * e3[2] - e2[2] * e3[1]) * inv, (e3[0] * e2[2] - e3[2] * e2[0]) * inv, (e2[0] * e3[1] - e2[1] * e3[0]) * inv],
+        [(e3[1] * e1[2] - e3[2] * e1[1]) * inv, (e1[0] * e3[2] - e1[2] * e3[0]) * inv, (e3[0] * e1[1] - e3[1] * e1[0]) * inv],
+        [(e1[1] * e2[2] - e1[2] * e2[1]) * inv, (e2[0] * e1[2] - e2[2] * e1[0]) * inv, (e1[0] * e2[1] - e1[1] * e2[0]) * inv],
+    ];
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for v in p.iter() { for a in 0..3 { lo[a] = lo[a].min(v[a]); hi[a] = hi[a].max(v[a]); } }
+    let c0: Vec<i64> = (0..3).map(|a| ((lo[a] / dxe) - 1.0).floor() as i64).collect();
+    let c1: Vec<i64> = (0..3).map(|a| ((hi[a] / dxe) + 1.0).ceil() as i64).collect();
+    let ne_i = ne as i64;
+    for ci in c0[0]..=c1[0] {
+        let iw = ci.rem_euclid(ne_i) as usize;
+        for cj in c0[1]..=c1[1] {
+            let jw = cj.rem_euclid(ne_i) as usize;
+            for ck in c0[2]..=c1[2] {
+                let kw = ck.rem_euclid(ne_i) as usize;
+                let mut cov = 0usize;
+                for si in 0..ss { let px = (ci as f64 + (si as f64 + 0.5) / ss as f64) * dxe; if px < lo[0] || px > hi[0] { continue; }
+                    for sj in 0..ss { let py = (cj as f64 + (sj as f64 + 0.5) / ss as f64) * dxe; if py < lo[1] || py > hi[1] { continue; }
+                        for sk in 0..ss { let pz = (ck as f64 + (sk as f64 + 0.5) / ss as f64) * dxe; if pz < lo[2] || pz > hi[2] { continue; }
+                            let r = [px - p[0][0], py - p[0][1], pz - p[0][2]];
+                            let b1 = m[0][0] * r[0] + m[0][1] * r[1] + m[0][2] * r[2];
+                            let b2 = m[1][0] * r[0] + m[1][1] * r[1] + m[1][2] * r[2];
+                            let b3 = m[2][0] * r[0] + m[2][1] * r[1] + m[2][2] * r[2];
+                            if b1 >= 0.0 && b2 >= 0.0 && b3 >= 0.0 && b1 + b2 + b3 <= 1.0 { cov += 1; }
+                        }
+                    }
+                }
+                if cov > 0 { rho[(iw * ne + jw) * ne + kw] += dens * cov as f64 * wsub; }
+            }
+        }
+    }
+}
