@@ -33,10 +33,9 @@ export function buildControls(app, host) {
   });
   C.n = sel(gm, { label: 'grid N', options: gridOptions(S.mode), value: S.n, onChange: (v) => app.setParam('n', Number(v), 'ic') });
   C.gc = checkbox(gm, { label: 'GPU compute', value: S.gc && app.gpuCompute, onChange: (v) => app.setGpuCompute(v) });
-  C.gc.el.title = 'WebGPU compute path for the 3D mode: LPT positions, CIC deposit, Hopf–Cole log-sum-exp, FFT spectra and Fourier maps on the GPU (single precision). Off: WASM (double precision, seconds at 128³).';
-  C.gcNote = el('p', 'lab-note-line', gm, 'GPU path: f32 arithmetic; CIC uses 18-bit fixed-point atomics (a cell overflows at ρ/ρ̄ ≥ 16384). LPT terms are uploaded once per build, so the D slider only recomputes the fields.');
-  C.memWarn = el('p', 'lab-warn', gm, '128³ with 4LPT needs about 1 GB of memory and 30–60 s per run. Lower orders are cheaper.');
-
+  C.gc.el.title = 'WebGPU compute path for the 3D mode: after the initial-condition draw everything runs in compute shaders (single precision): the nLPT term build, shell-crossing search, CIC and tetrahedral-sheet deposits, Hopf–Cole log-sum-exp, Legendre inversion with the transverse correction, FFT spectra and Fourier maps. Off: WASM (double precision, seconds at 128³).';
+  C.gcNote = el('p', 'lab-note-line', gm, 'GPU path: f32 arithmetic; the LPT terms are built on the GPU once per IC and order increase (about 0.2 s at 128³, 4LPT), so changing the order, Ωm, D or ν only recomputes cheap fields. CIC and sheet use 18-bit fixed-point atomics (a cell overflows at ρ/ρ̄ ≥ 16384).');
+  C.memWarn = el('p', 'lab-warn', gm);
   // ---------------------------------------------------------------- initial conditions
   const gi = group(host, 'Initial conditions');
   C.ic = sel(gi, { label: 'type', options: [['g', 'Gaussian random field'], ['w', 'two plane waves'], ['p', 'single peak']], value: S.ic, onChange: (v) => { app.setParam('ic', v, 'ic'); C.syncVisibility(); } });
@@ -88,7 +87,7 @@ export function buildControls(app, host) {
   C.order = sel(gd, { label: 'LPT order', options: [[1, '1 (Zel’dovich)'], [2, '2 (2LPT)'], [3, '3 (3LPT)'], [4, '4 (4LPT)']], value: S.order, onChange: (v) => { app.setParam('order', Number(v), 'all'); C.syncVisibility(); } });
   C.growth = el('p', 'lab-note-line', gd, 'LPT growth g_τ(D)/Dⁿ: –');
   C.hs = sel(gd, { label: 'HC source ϕ', options: [['zel', 'Zel’dovich / Burgers (1LPT)'], ['lpt', 'nLPT longitudinal (Legendre transform)'], ['lptT', 'nLPT + transverse correction']], value: S.hs,
-    title: 'Hopf–Cole source potential. Zel’dovich: S = −Dϕ, the Burgers equation in D. nLPT longitudinal: S = the longitudinal displacement potential of the chosen LPT order; the Legendre transform of q²/2 + S(q) inverts the gradient Lagrangian map, giving the exact nLPT Eulerian density before shell crossing. + transverse: first-order correction for the small curl part Ψ_T of 3LPT/4LPT (WASM only in 3D).',
+    title: 'Hopf–Cole source potential. Zel’dovich: S = −Dϕ, the Burgers equation in D. nLPT longitudinal: S = the longitudinal displacement potential of the chosen LPT order; the Legendre transform of q²/2 + S(q) inverts the gradient Lagrangian map, giving the exact nLPT Eulerian density before shell crossing. + transverse: first-order correction for the small curl part Ψ_T of 3LPT/4LPT (GPU or WASM).',
     onChange: (v) => { app.setParam('hs', v, 'nu'); C.syncVisibility(); } });
   C.hsNote = el('p', 'lab-note-line', gd);
   C.hsNote.hidden = true;
@@ -124,7 +123,11 @@ export function buildControls(app, host) {
     C.wave.forEach((w) => { w.comps[2].show(S.mode === 3); });
     C.hsNote.hidden = S.hs === 'zel';
     C.hsNote.textContent = S.hs === 'zel' ? '' : `Legendre inversion of the order-${S.order} map` + (S.hs === 'lptT' ? (S.order > 2 ? ' with the transverse correction (rms Ψ_T/Ψ_L in the Legendre lab)' : ' (Ψ is a pure gradient through 2LPT: no correction)') : '')
-      + (S.hs !== 'zel' && S.order === 1 ? ' = Zel’dovich' : '') + (S.mode === 3 && S.hs === 'lptT' && S.order > 2 ? '; WASM only in 3D, seconds per update' : S.mode === 3 && app.gpuCompute && S.gc ? '; the nLPT potential is computed by WASM and the solve runs on the GPU' : '') + '.';
+      + (S.hs !== 'zel' && S.order === 1 ? ' = Zel’dovich' : '') + (S.mode === 3 && app.gpuCompute && S.gc ? '; the nLPT build, its Helmholtz split, the solve and the transverse correction all run on the GPU' : S.mode === 3 && S.hs === 'lptT' && S.order > 2 ? '; WASM in 3D: seconds per update' : '') + '.';
+    const gpu3 = S.mode === 3 && app.gpuCompute && S.gc;
+    C.memWarn.textContent = gpu3
+      ? '128³ with 4LPT needs about 1 GB of GPU memory during the build (13 term fields, gradient tensors of the parent terms) and about 0.5 GB afterwards; a build takes about 0.2 s.'
+      : '128³ with 4LPT needs about 1 GB of memory and 30–60 s per run. Lower orders are cheaper.';
     C.memWarn.hidden = !(S.mode === 3 && S.n >= 128);
     C.gc.el.hidden = !(S.mode === 3 && app.gpuCompute);
     C.gcNote.hidden = C.gc.el.hidden || !S.gc;

@@ -81,7 +81,7 @@ export class LegendreLab {
       format: (v) => String(Math.round(v * Math.max(1, this.app.S.n - 1))), onInput: (v) => { S.si = v; this.sliceMoved(); } });
     this.warn3 = el('p', 'hcc-note lab-leg-status', this.root);
     this.warn3.hidden = true;
-    this.warnBig = el('p', 'lab-warn-note', this.root, 'The tetrahedral sheet is CPU-only and slow above 64³ (tens of seconds at 128³; prefer 32³–64³ for this section).');
+    this.warnBig = el('p', 'lab-warn-note', this.root, 'Without the GPU compute path the tetrahedral sheet runs in WASM and is slow above 64³ (tens of seconds at 128³; prefer 32³–64³ or switch GPU compute on).');
     this.warnBig.hidden = true;
     this.status = el('p', 'hcc-note lab-leg-status', this.root);
 
@@ -131,7 +131,7 @@ export class LegendreLab {
     this.sliceBar.hidden = !d3;
     this.axSel.set(this.app.S.sa); this.idxSl.set(this.app.S.si);
     this.warn3.hidden = !d3;
-    this.warn3.textContent = d3 ? 'Reference: the tetrahedral sheet density (six Kuhn simplices per Lagrangian cell, point-sampled). It is CPU-only and slow (about 1 s at 64³); the Hopf–Cole fields use the GPU path when active (the transverse-corrected variant is WASM only). Slices share the axis and index of the slice panel in the Fields section.' : '';
+    this.warn3.textContent = d3 ? 'Reference: the tetrahedral sheet density (six Kuhn simplices per Lagrangian cell, point-sampled). With GPU compute on, the nLPT build, the sheet, the Legendre inversion (including the transverse correction) and the spectra all run in WebGPU compute shaders (milliseconds at 64³–128³); otherwise WASM (about 1 s at 64³). Slices share the axis and index of the slice panel in the Fields section.' : '';
   }
   rangeChanged() {
     this.app.hashChanged();
@@ -165,8 +165,10 @@ export class LegendreLab {
   tasks(P) {
     const e = this.app.eng, d3 = P.mode === 3;
     const t = [];
-    this.warnBig.hidden = !(d3 && P.n > 64);
-    t.push({ label: d3 ? 'Legendre lab: sheet (tetrahedra, CPU)' : 'Legendre lab: sheet', heavy: d3, fn: () => { e.delta('sheet', P); } });
+    const gpu3 = d3 && e.gpuActive(P);
+    this.warnBig.hidden = !(d3 && !gpu3 && P.n > 64);
+    t.push({ label: d3 ? (gpu3 ? 'Legendre lab: sheet (tetrahedra, GPU)' : 'Legendre lab: sheet (tetrahedra, CPU)') : 'Legendre lab: sheet', heavy: d3 && !gpu3,
+      fn: async () => { await e.need('field', 'sheet', P); e.delta('sheet', P); } });
     t.push({ label: 'Legendre lab: Hopf–Cole (Legendre, Zel’dovich)', fn: async () => {
       await e.need('field', 'hcl', P); await e.need('field', 'hcz', P);
       e.delta('hcl', P); e.delta('hcz', P); e.psiT(P);
@@ -212,7 +214,7 @@ export class LegendreLab {
     this.pdLeg.titleEl.textContent = 'Legendre − sheet';
     this.pdZel.titleEl.textContent = 'Zel’dovich HC − sheet';
     const nuTxt = `ν = ${P.nu.toExponential(1)}`;
-    this.pSheet.cap.textContent = `Multi-stream reference: Σ 1/|J| over all streams of the ${ordName(order)} map x(q,D)${P.mode === 3 ? ' (Kuhn tetrahedra, CPU)' : ' (2×2 supersampled triangles)'}${where}. It carries rasterization noise at the cell scale that shrinks with N, and after shell crossing it adds the streams.`;
+    this.pSheet.cap.textContent = `Multi-stream reference: Σ 1/|J| over all streams of the ${ordName(order)} map x(q,D)${P.mode === 3 ? ' (Kuhn tetrahedra)' : ' (2×2 supersampled triangles)'}${where}. It carries rasterization noise at the cell scale that shrinks with N, and after shell crossing it adds the streams.`;
     this.pLeg.cap.textContent = `1+δ = det(I − ∇∇Φ), Φ the Legendre transform (Hopf–Lax minimum, heat-kernel smoothed: ${nuTxt}) of q²/2 + S(q) for the ${lpt} potential S; particle-free, on the Eulerian grid. Before shell crossing this is the exact ${ordName(order)} density; afterwards it keeps one stream per point (adhesion), so walls replace the multi-stream regions.`;
     this.pZel.cap.textContent = `The same solver with the Zel’dovich potential S = −Dϕ: the Burgers/adhesion solution (${nuTxt}). It is exact for the Zel’dovich map and misses the 2LPT and higher displacement, so filaments sit slightly off.`;
     this.pdLeg.cap.textContent = `Δ(1+δ) = Legendre − sheet, symmetric colour scale ±${fmtNum(dr, 2)}. Before shell crossing the residual is the sheet’s rasterization noise (shrinks with N) plus ν-smoothing${order > 2 ? ' and the neglected or approximately corrected transverse displacement' : ''}; after shell crossing the sheet sums streams, so it exceeds the Legendre density inside the folds.`;

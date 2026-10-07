@@ -8,8 +8,8 @@ import { slice3D } from '../hcc.js';
 import { el, sel } from './dom.js';
 
 const CMAPS = Object.keys(COLORMAPS).map((c) => [c, c]);
-const FIELDS = [['cic', 'CIC density'], ['sheet', 'Sheet density (tetrahedra, CPU)'], ['hc', 'Hopf–Cole density'], ['lin', 'Linear density 1+Dδ0']];
-const FNAME = { cic: 'CIC density', sheet: 'tetrahedral sheet density (Kuhn simplices, point-sampled, CPU)', hc: 'Hopf–Cole density 1+δ', lin: 'linear density 1+Dδ0 (clipped at 10⁻³)' };
+const FIELDS = [['cic', 'CIC density'], ['sheet', 'Sheet density (tetrahedra)'], ['hc', 'Hopf–Cole density'], ['lin', 'Linear density 1+Dδ0']];
+const FNAME = { cic: 'CIC density', sheet: 'tetrahedral sheet density (Kuhn simplices, point-sampled)', hc: 'Hopf–Cole density 1+δ', lin: 'linear density 1+Dδ0 (clipped at 10⁻³)' };
 
 export class Fields3D {
   constructor(app, host) {
@@ -107,9 +107,9 @@ export class Fields3D {
     const S = this.app.S, e = this.app.eng, warm = e.gpuActive(P) && !!e.g && !!e.ref;
     const dep = this.dependsOnHc();
     const t = [
-      { label: 'volume', heavy: !warm || S.v1 === 'sheet', fn: () => this.updateVolume(P), hc: dep.vol },
-      { label: 'slice', heavy: S.s1 === 'sheet', fn: () => this.updateSlice(P), hc: dep.slice },
-      { label: 'Fourier amplitude', heavy: !warm || S.fo === 'sheet', fn: () => this.updateFourier(2, P), hc: dep.fourier },
+      { label: 'volume', heavy: !warm, fn: () => this.updateVolume(P), hc: dep.vol },
+      { label: 'slice', heavy: S.s1 === 'sheet' && !warm, fn: () => this.updateSlice(P), hc: dep.slice },
+      { label: 'Fourier amplitude', heavy: !warm, fn: () => this.updateFourier(2, P), hc: dep.fourier },
       { label: 'Fourier phase', heavy: false, fn: () => this.updateFourier(3, P), hc: dep.fourier },
     ];
     return hcOnly ? t.filter((q) => q.hc) : t;
@@ -144,7 +144,7 @@ export class Fields3D {
     this.vv.setRange(undefined, undefined, { log: S.l1 });
     const gpuCic = S.v1 === 'cic' && eng.lastPath === 'GPU' && eng.gpuActive(P);
     this.capV.textContent = `${FNAME[S.v1]}: ${S.vm === 'mip' ? 'maximum-intensity projection' : 'emission-absorption ray marching'} through the ${eng.n}³ box.`
-      + (S.v1 === 'sheet' ? ` CPU only: about 1 s at 64³, 4 s at 96³${eng.n >= 128 ? '; at 128³ this takes tens of seconds, prefer CIC or Hopf–Cole' : ''}.` : '')
+      + (S.v1 === 'sheet' ? (eng.lastPath === 'GPU' && eng.gpuActive(P) ? ' GPU: one thread per Lagrangian cell, six Kuhn tetrahedra, watertight point-in-tetrahedron tests, 18-bit fixed-point atomics.' : ` WASM (GPU compute off): about 1 s at 64³, 4 s at 96³${eng.n >= 128 ? '; at 128³ this takes tens of seconds, prefer CIC or Hopf–Cole' : ''}.`) : '')
       + (gpuCic ? ' GPU CIC deposits 18-bit fixed-point weights with integer atomics (mass conserved exactly); a cell would overflow at ρ/ρ̄ ≥ 16384.' : '');
     this.drawVolume();
     this.pv.root.classList.remove('is-stale');

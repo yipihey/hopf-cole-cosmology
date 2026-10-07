@@ -294,16 +294,19 @@ export class Lab {
     this.appliedKey = null;
     this.eng.setGpuPath(this.gpuComputeOn(P));
     tasks.push({ label: 'initial conditions', heavy: icChanged, critical: true, fn: () => { this.eng.configure(P); this.eng.applyCosmology(P.om); } });
-    tasks.push({ label: `LPT order ${P.order}`, heavy: icChanged || this.eng.builtOrder < P.order || P.om !== this.eng.om, critical: true,
+    const gpuOn = this.gpuComputeOn(P);
+    // GPU path: the LPT task only sets up the growth tables (milliseconds); the fields are built on the GPU below
+    tasks.push({ label: gpuOn ? `growth tables, order ${P.order}` : `LPT order ${P.order}`, heavy: !gpuOn && (icChanged || this.eng.builtOrder < P.order || P.om !== this.eng.om), critical: true,
       fn: () => { this.eng.ensureLpt(P.order); this.limitD(P); } });
-    if (heavy3) tasks.push({ label: 'GPU upload', heavy: this.gpuComputeOn(P) && (icChanged || !this.eng.g || !this.eng.gTerms || this.eng.gTerms.order < P.order), fn: () => this.eng.prepareGpu(P) });
+    if (heavy3) tasks.push({ label: 'GPU nLPT build', heavy: false, fn: () => this.eng.prepareGpu(P) });
     if (this.visible('f')) {
       const ft = this.fields.tasks(P);
       tasks.push(...ft.filter((t) => !t.heavy), ...ft.filter((t) => t.heavy));
     }
     if (this.visible('s')) tasks.push(...this.spectra.tasks(P));
     if (this.visible('l')) tasks.push(...this.legendre.tasks(P));
-    tasks.push({ label: 'shell-crossing times', heavy: heavy3 && this.eng.peek(['dsc', P.order]) === undefined, fn: () => { this.eng.dsc(P.order); this.eng.dsc(1); this.refreshReadouts(); } });
+    tasks.push({ label: 'shell-crossing times', heavy: heavy3 && !gpuOn && this.eng.peek(['dsc', P.order]) === undefined,
+      fn: async () => { await this.eng.needDsc(P); this.eng.dsc(P.order); this.eng.dsc(1); this.refreshReadouts(); } });
 
     const ok = await this.runTasks(tasks, gen);
     if (gen !== this.runGen) return;

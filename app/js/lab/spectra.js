@@ -66,7 +66,7 @@ export class Spectra {
 
   syncMode() {
     const d3 = this.app.S.mode === 3;
-    this.checks.sheet.el.querySelector('.hcc-label').textContent = d3 ? 'sheet (tetrahedra, CPU)' : 'sheet (measured)';
+    this.checks.sheet.el.querySelector('.hcc-label').textContent = d3 ? 'sheet (tetrahedra)' : 'sheet (measured)';
     this.checks.cic.el.querySelector('.hcc-label').textContent = d3 ? 'CIC (measured, deconv.)' : 'CIC (deconv.)';
     const ser = this.app.S.ser;
     for (const id of Object.keys(this.checks)) this.checks[id].set(ser.includes(id));

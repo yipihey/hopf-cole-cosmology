@@ -27,3 +27,30 @@ export function termGrowth(sim, orders, D) {
   if (typeof sim.term_g === 'function') return Array.from(sim.term_g(D));
   return orders.map((o) => Math.pow(D, o));
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Unmerged (raw recursion) term list, used by the GPU nLPT build (lpt3d.js).  The spatial fields S^tau of the raw list
+// do not depend on the cosmology; only g_tau(D) does.  In EdS g_tau = c_tau D^order (merging terms of equal order gives
+// the classical Psi^(n)); in LCDM every raw term has its own growth function (term_g_unmerged).
+
+/**
+ * @param sim a CosmoSim with build_lpt(order) done (any grid size: the list depends on order and cosmology only)
+ * @returns {{count:number, orders:number[], kind:number[], a:number[], b:number[], c:number[], coefs:Float64Array, eds:boolean}}
+ */
+export function getUnmergedSpec(sim) {
+  const f = sim.term_specs_unmerged();
+  const count = f.length / 5;
+  const o = { count, orders: [], kind: [], a: [], b: [], c: [], coefs: sim.term_coefs_unmerged(), eds: Math.abs(sim.omega_m() - 1) < 1e-12 };
+  for (let t = 0; t < count; t++) { o.orders.push(f[5 * t]); o.kind.push(f[5 * t + 1]); o.a.push(f[5 * t + 2]); o.b.push(f[5 * t + 3]); o.c.push(f[5 * t + 4]); }
+  return o;
+}
+
+/**
+ * g_tau(D) for the unmerged list: closed form in EdS; in LCDM the WASM tables.  In LCDM the sim's own term list IS the raw list
+ * (nothing is merged), so term_g(D) - a table lookup - equals term_g_unmerged(D) (which re-integrates the growth ODEs on every call,
+ * milliseconds): use the former.  `sim` must have built (at least) the order of `spec`.
+ */
+export function growthUnmerged(sim, spec, D) {
+  if (spec.eds) return spec.orders.map((o, t) => spec.coefs[t] * Math.pow(D, o));
+  return Array.from(sim.term_g(D));
+}

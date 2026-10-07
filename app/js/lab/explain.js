@@ -9,7 +9,7 @@ const NOTES = [
     html: `Cold dark matter occupies a thin three-dimensional sheet in six-dimensional phase space (in 2D mode: a two-dimensional sheet in four-dimensional phase space).
       Every Lagrangian label <b>q</b> is carried to <b>x</b>(q, D) = q + ΣₙDⁿ Ψ⁽ⁿ⁾(q), where the displacement terms Ψ⁽ⁿ⁾ are built recursively from the initial field.
       The density is the sum of 1/|J| over all points of the sheet that project onto the same <b>x</b>, with J = det ∂x/∂q. Where J reaches zero the sheet folds over itself (shell crossing) and the density has caustics; beyond it several streams overlap.
-      In 3D the sheet density is evaluated exactly the same way on the CPU: every Lagrangian cube is cut into six Kuhn tetrahedra, each carrying mass Δq³/6, and every Eulerian sample point inside a deformed tetrahedron receives its mass over its volume (summed over streams); it is point-sampled (about 1 s at 64³), whereas CIC deposits the particles and blurs the result.
+      In 3D the sheet density is evaluated exactly the same way (on the GPU, one thread per Lagrangian cell, or in WASM): every Lagrangian cube is cut into six Kuhn tetrahedra, each carrying mass Δq³/6, and every Eulerian sample point inside a deformed tetrahedron receives its mass over its volume (summed over streams); it is point-sampled (about 10 ms at 128³ on the GPU, 1 s at 64³ in WASM), whereas CIC deposits the particles and blurs the result.
       The GPU panel draws every triangle of the deformed grid with additive blending, so overlapping streams add up exactly as they should; the “wire” view shows the folds themselves.
       The growth factor D plays the role of time; with σ0 = 1, D is the rms of the linear density contrast.`,
   },

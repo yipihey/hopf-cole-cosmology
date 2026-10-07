@@ -6,7 +6,9 @@ import { getGPU } from '../viz/gpu.js';
 import { GpuFFT3D } from './fft3d.js';
 import { GpuCosmo3D } from './cosmo3d.js';
 import { STORAGE_RW } from './util.js';
-import { getTerms } from './terms.js';
+import { getTerms, getUnmergedSpec, growthUnmerged } from './terms.js';
+import { GpuLpt3D } from './lpt3d.js';
+import { GpuSheet3D } from './sheet3d.js';
 
 const out = document.getElementById('out');
 const tbl = document.getElementById('tbl');
@@ -71,7 +73,7 @@ export async function validate(core, gpu, n, { om = 1, order = 2 } = {}) {
   log(`terms: ${T.orders.length} (orders ${T.orders.join(',')}) via ${T.source}`);
   const g = new GpuCosmo3D(device, n); await g.init();
   await g.uploadTerms(T.terms, T.orders);
-  g.setPhi0(sim.phi0());
+  await g.setPhi0(sim.phi0());
   const D = 0.3, nu = 1e-4;
 
   // positions
@@ -180,7 +182,7 @@ export async function bench(core, gpu, n) {
   const g = new GpuCosmo3D(device, n); await g.init();
   const tUp0 = performance.now();
   await g.uploadTerms(T.terms, T.orders);
-  g.setPhi0(sim.phi0());
+  await g.setPhi0(sim.phi0());
   await g.sync();
   const tUp = performance.now() - tUp0;
   const D = 0.3, nu = 1e-4;
@@ -218,17 +220,207 @@ export async function bench(core, gpu, n) {
   return R;
 }
 
-export async function runAll({ val = [32, 64], ben = [64, 128] } = {}) {
-  const res = { rows, bench: [], error: null };
+
+// ------------------------------------------------------------------------------------------------------------------
+// GPU-resident nLPT: term build, D_sc, Legendre (+ transverse), tetrahedral sheet
+
+const relRms = (a, b) => rmsDiff(a, b) / Math.max(rms(b), 1e-30);
+
+/** Interleaved xyz field from the three WASM component arrays. */
+function interleave(f, N) { const o = new Float32Array(3 * N); for (let c = 0; c < 3; c++) { const a = f(c); for (let i = 0; i < N; i++) o[3 * i + c] = a[i]; } return o; }
+
+export async function validateLpt(core, gpu, n, { om = 1, order = 4 } = {}) {
+  const { device } = gpu;
+  const tag = om === 1 ? `${n} (EdS, ${order}LPT)` : `${n} (Om=${om}, ${order}LPT)`;
+  log(`--- GPU nLPT validation n = ${tag}`);
+  const N = n ** 3;
+  const { sim } = await makeSim(core, n, om, order);
+  const spec = getUnmergedSpec(sim);
+  const d0 = sim.linear_delta(1.0);
+  const g = new GpuCosmo3D(device, n); await g.init();
+  const lpt = new GpuLpt3D(g); await lpt.init();
+  const sheet = new GpuSheet3D(g); await sheet.init();
+  const tb = await lpt.build(d0, spec, order);
+  log(`built ${tb.count} raw terms in ${tb.ms.toFixed(0)} ms`);
+  const gf = (D) => growthUnmerged(sim, spec, D).slice(0, tb.count);
+  if (om !== 1) {
+    // the lab uses the cheap table lookup term_g in LCDM; it must equal the unmerged accessor
+    let md = 0; for (const D of [0.1, 0.3, 0.6]) { const a = sim.term_g(D), b = sim.term_g_unmerged(D); for (let t = 0; t < a.length; t++) md = Math.max(md, Math.abs(a[t] - b[t]) / Math.max(1e-30, Math.abs(b[t]))); }
+    record(tag, 'term_g(D) (tables) vs term_g_unmerged(D): max relative difference', md, 1e-9);
+  }
+
+  // --- term fields
+  const dev = [];
+  if (om === 1) {
+    const S = [];
+    for (let t = 0; t < tb.count; t++) S.push(await g.readField(g.terms[t], 3 * N));
+    for (let o = 1; o <= order; o++) {
+      const sum = new Float32Array(3 * N);
+      for (let t = 0; t < tb.count; t++) if (spec.orders[t] === o) { const c = spec.coefs[t]; for (let i = 0; i < 3 * N; i++) sum[i] += c * S[t][i]; }
+      const ref = interleave((c) => sim.term_psi(o - 1, c), N);
+      record(tag, `order ${o}: rel rms of sum_tau c_tau S^tau vs term_psi`, relRms(sum, ref), 1e-4);
+    }
+  } else {
+    for (let t = 0; t < tb.count; t++) {
+      const S = await g.readField(g.terms[t], 3 * N);
+      const ref = interleave((c) => sim.term_psi(t, c), N);
+      dev.push(relRms(S, ref));
+    }
+    record(tag, `${tb.count} raw terms: worst rel rms vs term_psi`, Math.max(...dev), 1e-4);
+  }
+  record(tag, 'phi0 (GPU, from delta0): rel rms vs WASM phi0', relRms(await g.readField(g.buf('phi0')), sim.phi0()), 1e-4);
+
+  // --- D_sc (EdS: D_sc is where the first Jacobian vanishes; compare the whole search)
+  const dmax = sim.d_max();
+  const dsc = [];
+  for (let o = 1; o <= order; o++) {
+    const gpuD = await lpt.shellCrossing(o, (D) => gf(D), dmax);
+    const wD = sim.shell_crossing(o);
+    dsc.push(wD);
+    record(tag, `D_sc(${o}LPT) GPU ${gpuD.toFixed(5)} vs WASM ${wD.toFixed(5)}: relative difference`, Number.isFinite(wD) ? Math.abs(gpuD - wD) / wD : (gpuD === wD ? 0 : Infinity), 1e-3);
+  }
+
+  // --- positions
+  const Dp = 0.3;
+  for (let o = 1; o <= order; o++) {
+    const px = await g.readField(g.positions(gf(Dp), o), 3 * N);
+    const pw = sim.positions(Dp, o);
+    const q = new Float32Array(3 * N);
+    for (let i = 0; i < N; i++) { const ix = Math.floor(i / (n * n)), iy = Math.floor(i / n) % n, iz = i % n; q[3 * i] = ix / n; q[3 * i + 1] = iy / n; q[3 * i + 2] = iz / n; }
+    const dg = new Float32Array(3 * N), dw = new Float32Array(3 * N);
+    for (let i = 0; i < 3 * N; i++) { dg[i] = px[i] - q[i]; dw[i] = pw[i] - q[i]; }
+    record(tag, `positions ${o}LPT (D=${Dp}): rms|x_gpu - x_wasm| / rms(Psi)`, relRms(dg, dw), 1e-4);
+  }
+
+  // --- Legendre inversion (two operating points: before and after the first shell crossing of the chosen order)
+  const dscO = Number.isFinite(dsc[order - 1]) ? dsc[order - 1] : 1;
+  const cases = [{ name: '0.5 D_sc', D: 0.5 * dscO, nu: 1e-4 }, { name: '1.5 D_sc', D: 1.5 * dscO, nu: 1e-3 }, { name: '3 D_sc', D: 3 * dscO, nu: 1e-3 }];
+  for (const cs of cases) {
+    const { D, nu } = cs;
+    const gv = gf(D);
+    const L = await lpt.legendre(gv, order, D);
+    let dNoT = null;
+    for (const tr of (order > 2 ? [false, true] : [false])) {
+      const enc = device.createCommandEncoder();
+      const hc = g.hopfCole(nu, D, enc, 'phi-eff');
+      if (tr) lpt.transverse(D, enc);
+      device.queue.submit([enc.finish()]);
+      const dG = await g.readField(hc.delta);
+      const frac = sim.hopf_cole_lpt(D, order, nu, 1, 30, tr);
+      const dW = sim.hc_delta();
+      record(tag, `Legendre ${order}LPT${tr ? '+transverse' : ''} (${cs.name}=${D.toFixed(4)}, nu=${nu}, w=${hc.w}): rms diff / rms(d)`, relRms(dG, dW), 1e-3);
+      if (!tr) dNoT = dG;
+      else if (dNoT) log(`  size of the transverse correction at ${cs.name}: rms(d_T - d_noT)/rms(d) = ${relRms(dG, dNoT).toExponential(2)}`);
+      if (tr) record(tag, `  rms|Psi_T|/rms|Psi_L| GPU ${L.frac.toExponential(3)} vs WASM ${frac.toExponential(3)}: rel. difference`, Math.abs(L.frac - frac) / Math.max(frac, 1e-30), 1e-3);
+    }
+    // --- tetrahedral sheet
+    const disp = g.displacement(gv, order);
+    const rhoG = await g.readField(sheet.density(disp));
+    const rhoW = sim.sheet_density(D, order, n, 1);
+    let mg = 0, mw = 0; for (let i = 0; i < N; i++) { mg += rhoG[i]; mw += rhoW[i]; }
+    const rhoRef = Float32Array.from(rhoW, (v) => v - 1);
+    // before the first shell crossing the density is smooth and the f32 terms are enough for 1e-4; after it the density is dominated
+    // by caustics, which amplify the 1e-6 relative differences of the f32 vs f64 displacement: end-to-end tolerance 1e-3 there
+    record(tag, `sheet ${order}LPT (${cs.name}): rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(rhoG, rhoW) / rms(rhoRef), cs.D < dscO ? 1e-4 : 1e-3);
+    if (cs.D >= dscO) {
+      // algorithm check: the same tetrahedra (WASM positions as input) must reproduce the f64 raster to 1e-4 also with multiple streams
+      const pw = sim.positions(D, order), psiW = new Float32Array(3 * N);
+      for (let i = 0; i < N; i++) { const ix = Math.floor(i / (n * n)), iy = Math.floor(i / n) % n, iz = i % n; psiW[3 * i] = pw[3 * i] - ix / n; psiW[3 * i + 1] = pw[3 * i + 1] - iy / n; psiW[3 * i + 2] = pw[3 * i + 2] - iz / n; }
+      const bW = device.createBuffer({ size: 12 * N, usage: STORAGE_RW });
+      device.queue.writeBuffer(bW, 0, psiW);
+      const rhoA = await g.readField(sheet.density(bW));
+      record(tag, `sheet ${order}LPT (${cs.name}), WASM positions as input: rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(rhoA, rhoW) / rms(rhoRef), 1e-4);
+      bW.destroy();
+    }
+    record(tag, `sheet ${order}LPT (${cs.name}): |mean_gpu - mean_wasm|  (means ${(mg / N).toFixed(6)} / ${(mw / N).toFixed(6)})`, Math.abs(mg - mw) / N, 1e-5);
+  }
+  // velocity jump
+  const du = await lpt.velocityJump();
+  const v = sim.velocities(1.0, 1);
+  let lo = Infinity, hi = 0; for (let i = 0; i < N; i++) { const s = Math.hypot(v[3 * i], v[3 * i + 1], v[3 * i + 2]); lo = Math.min(lo, s); hi = Math.max(hi, s); }
+  record(tag, 'velocity jump max|S1| - min|S1|: relative difference', Math.abs(du - (hi - lo)) / (hi - lo), 1e-4);
+  lpt.destroy(); g.destroy(); sim.free();
+}
+
+const msOf = async (g, fn, reps = 3) => {
+  const ts = [];
+  for (let i = 0; i < reps + 1; i++) { const t0 = performance.now(); const r = fn(); if (r && r.then) await r; if (g) await g.sync(); ts.push(performance.now() - t0); }
+  ts.shift(); ts.sort((a, b) => a - b); return ts[Math.floor(ts.length / 2)];
+};
+
+/** Timings of every stage of the 3-D nLPT pipeline, GPU vs WASM. `wasmOrder` limits the WASM reference at large n. */
+export async function benchLpt(core, gpu, n, { order = 4, wasmOrder = order, wasm = true } = {}) {
+  const { device } = gpu;
+  log(`--- nLPT pipeline benchmark n = ${n}, GPU order ${order}, WASM order ${wasmOrder}`);
+  const N = n ** 3;
+  const R = { n, order, wasmOrder };
+  let t0 = performance.now();
+  const sim = new core.CosmoSim(3, n, 1);
+  sim.set_ic_gaussian(0, -1, 0, 0.05, 1, 1);
+  const d0 = sim.linear_delta(1.0);
+  R.IC = performance.now() - t0;
+  // helper sim for the growth tables / term list (what the lab does)
+  const helper = new core.CosmoSim(3, 8, 1); helper.build_lpt(order);
+  const spec = getUnmergedSpec(helper);
+  const g = new GpuCosmo3D(device, n); await g.init();
+  const lpt = new GpuLpt3D(g); await lpt.init();
+  const sheet = new GpuSheet3D(g); await sheet.init();
+  t0 = performance.now();
+  await lpt.build(d0, spec, order);
+  await g.sync();
+  R.gpu_build_first = performance.now() - t0;
+  R.gpu_build = await msOf(g, () => lpt.build(d0, spec, order), 2);
+  const gf = (D) => growthUnmerged(helper, spec, D).slice(0, spec.count);
+  const dmax = Infinity;
+  t0 = performance.now();
+  const dscG = await lpt.shellCrossing(order, gf, dmax);
+  R.gpu_dsc = performance.now() - t0;
+  R.gpu_dsc = await msOf(null, () => lpt.shellCrossing(order, gf, dmax), 2);
+  R.dsc = dscG;
+  const D = 0.5 * dscG, nu = 1e-4;
+  const gv = gf(D);
+  R.gpu_positions = await msOf(g, () => g.positions(gv, order));
+  R.gpu_cic = await msOf(g, () => g.cicDensity(g.positions(gv, order)));
+  R.gpu_hc_zel = await msOf(g, () => g.hopfCole(nu, D));
+  R.gpu_legendre_split = await msOf(null, () => lpt.legendre(gv, order, D));
+  R.gpu_legendre_hc = await msOf(g, () => g.hopfCole(nu, D, null, 'phi-eff'));
+  R.gpu_legendre_total = await msOf(null, async () => { await lpt.legendre(gv, order, D); const e = device.createCommandEncoder(); g.hopfCole(nu, D, e, 'phi-eff'); lpt.transverse(D, e); device.queue.submit([e.finish()]); });
+  R.gpu_legendre_total_readback = await msOf(null, async () => { await lpt.legendre(gv, order, D); const e = device.createCommandEncoder(); const hc = g.hopfCole(nu, D, e, 'phi-eff'); lpt.transverse(D, e); device.queue.submit([e.finish()]); await g.readField(hc.delta); });
+  R.gpu_sheet = await msOf(g, () => sheet.density(g.displacement(gv, order)));
+  R.gpu_sheet_readback = await msOf(null, async () => { await g.readField(sheet.density(g.displacement(gv, order))); });
+  R.gpu_dpath = await msOf(null, async () => { const pos = g.positions(gf(D * 1.01), order); await g.readField(g.cicDensity(pos)); });
+  if (wasm) {
+    const wsim = sim;
+    t0 = performance.now(); wsim.build_lpt(wasmOrder); R.wasm_build = performance.now() - t0;
+    const tw = (fn) => { const t = performance.now(); fn(); return performance.now() - t; };
+    R.wasm_positions = tw(() => wsim.positions(D, wasmOrder));
+    R.wasm_cic = tw(() => wsim.cic_density(D, wasmOrder, n));
+    R.wasm_hc_zel = tw(() => wsim.hopf_cole(D, nu, 1, 30));
+    R.wasm_legendre_transverse = tw(() => wsim.hopf_cole_lpt(D, wasmOrder, nu, 1, 30, true));
+    R.wasm_dsc = tw(() => { R.wasm_dsc_value = wsim.shell_crossing(wasmOrder); });
+    R.wasm_sheet = tw(() => wsim.sheet_density(D, wasmOrder, n, 1));
+  }
+  log(JSON.stringify(R, (k, v) => (typeof v === 'number' ? +v.toPrecision(4) : v)));
+  lpt.destroy(); g.destroy(); sim.free(); helper.free();
+  return R;
+}
+
+export async function runAll({ val = [32, 64], ben = [64, 128], lval = [32, 64], lben = [64, 128], wasmOrder128 = 4, skipOld = false } = {}) {
+  const res = { rows, bench: [], lbench: [], error: null };
   window.__gpuTest = res;
   try {
     const core = await loadCore();
     const gpu = await getGPU();
     if (!gpu) { log('WebGPU not available'); res.error = 'no webgpu'; return res; }
     log(`adapter limits: maxStorageBufferBindingSize ${(gpu.device.limits.maxStorageBufferBindingSize / 1048576)} MiB, maxBufferSize ${(gpu.device.limits.maxBufferSize / 1048576)} MiB`);
-    for (const n of val) await validate(core, gpu, n);
-    await validate(core, gpu, 32, { om: 0.3, order: 3 });          // flat LCDM: 8 LPT terms, numerically integrated growth
-    for (const n of ben) res.bench.push(await bench(core, gpu, n));
+    if (!skipOld) {
+      for (const n of val) await validate(core, gpu, n);
+      await validate(core, gpu, 32, { om: 0.3, order: 3 });          // flat LCDM: 8 LPT terms, numerically integrated growth
+    }
+    for (const n of lval) await validateLpt(core, gpu, n, { om: 1, order: 4 });
+    for (const n of lval) await validateLpt(core, gpu, n, { om: 0.3, order: 3 });
+    if (!skipOld) for (const n of ben) res.bench.push(await bench(core, gpu, n));
+    for (const n of lben) res.lbench.push(await benchLpt(core, gpu, n, { order: 4, wasmOrder: n >= 128 ? wasmOrder128 : 4, wasm: !(n >= 128 && wasmOrder128 === 0) }));
     const fails = rows.filter((r) => !r.pass).length;
     log(fails ? `FAILED: ${fails} of ${rows.length}` : `ALL ${rows.length} CHECKS PASSED`);
     res.fails = fails;
@@ -243,5 +435,6 @@ export async function runAll({ val = [32, 64], ben = [64, 128] } = {}) {
 
 const q = new URLSearchParams(location.search);
 const list = (k, d) => (q.has(k) ? q.get(k).split(',').filter(Boolean).map(Number) : d);
-document.getElementById('run').addEventListener('click', () => runAll({ val: list('val', [32, 64]), ben: list('bench', [64, 128]) }));
-if (q.has('auto')) runAll({ val: list('val', [32, 64]), ben: list('bench', [64, 128]) });
+const opts = () => ({ val: list('val', [32, 64]), ben: list('bench', [64, 128]), lval: list('lval', [32, 64]), lben: list('lbench', [64, 128]), wasmOrder128: list('wo128', [4])[0], skipOld: q.has('skipold') });
+document.getElementById('run').addEventListener('click', () => runAll(opts()));
+if (q.has('auto')) runAll(opts());

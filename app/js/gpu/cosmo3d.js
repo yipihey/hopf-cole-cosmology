@@ -10,11 +10,15 @@
 // next call of the same method - read them back (readField) or consume them before then):
 //
 //   const g = new GpuCosmo3D(device, n);   await g.init();
-//   await g.uploadTerms(terms /* Float32Array(3 n^3)[] */, orders /* number[] */);
-//   g.setPhi0(phi0 /* Float32Array(n^3), laplacian(phi) = delta0 */);
+//   await g.uploadTerms(terms /* Float32Array(3 n^3)[] */, orders /* number[] */);   (WASM-built terms) or
+//   GpuLpt3D (lpt3d.js) builds the terms on the GPU and installs them with g.installTerms(bufs, orders)
+//   await g.setPhi0(phi0 /* Float32Array(n^3), laplacian(phi) = delta0 */);   (GpuLpt3D.build writes it itself)
 //   pos  = g.positions(gvals /* g_tau(D) per term */, order)  -> GPUBuffer 3 n^3 f32, unwrapped
+//   disp = g.displacement(gvals, order [, enc, name])         -> GPUBuffer 3 n^3 f32, Psi = x - q (box units)
 //   rho  = g.cicDensity(pos)                                  -> GPUBuffer n^3 f32, rho / rhobar
-//   {delta, phi} = g.hopfCole(nu, D)                          -> GPUBuffers n^3 f32 (delta, Phi_v = -2 nu ln psi)
+//   {delta, phi} = g.hopfCole(nu, D [, enc, src])             -> GPUBuffers n^3 f32 (delta, Phi_v = -2 nu ln psi); src = 'phi0' (Zel'dovich)
+//                                                                or 'phi-eff' (nLPT effective potential, GpuLpt3D.legendre)
+//   st = await g.potentialStats(name)                         -> {gmax, range} of a potential buffer, measured on the GPU
 //   {k, p, n} = await g.powerSpectrum(field, nbins, deconvolveCic [, offset])      Float64Array each
 //   {amp, phase} = await g.fourierMaps(field [, offset])      Float32Array n^2, fft-shifted [ikx*n + iky]
 //   an = await g.analyze(field, {nbins, offset, maps, cross}) -> one FFT, everything at once (see below)
@@ -32,7 +36,8 @@
 //  * Hopf-Cole and FFTs are single precision: the log-domain values carry |phi|/(2 nu) * 6e-8 absolute error,
 //    which becomes ~ |phi_max| * 2e-3 in the 4th-order Hessian at 128^3; deltas agree with the f64 WASM result
 //    to ~1e-4 of the field rms for the default parameters.
-//  * Memory: 3 n^3 f32 per LPT term, about 20 n^3 f32 of working buffers.  The adapter's
+//  * Memory: 3 n^3 f32 per LPT term (13 raw terms for 4LPT: 312 MiB at 128^3), about 20 n^3 f32 of working buffers plus
+//    the nLPT build/Legendre buffers of lpt3d.js (see its header; 688 MiB steady state at 128^3 4LPT).  The adapter's
 //    maxStorageBufferBindingSize (128 MiB by default) limits n to 128 (positions: 12 n^3 bytes = 25 MB at 128^3,
 //    201 MB at 256^3 > limit).  The constructor throws when a buffer would exceed the limits.
 
@@ -41,6 +46,7 @@ import {
   ParamRing, makePipeline, makeBindGroup, dispatch1d, compile, readRegions,
   U_ENTRY, RO_ENTRY, RW_ENTRY, WGSL_LINEAR, STORAGE_RW,
 } from './util.js';
+import { Reducer, OP, RED_PRELUDE, stage1Layout } from './reduce.js';
 
 export const CIC_SCALE = 1 << 18;
 const WG = 256;
@@ -49,7 +55,7 @@ const SHADERS = /* wgsl */`
 ${WGSL_LINEAR}
 
 // ---------------------------------------------------------------- LPT positions
-struct PosU { count: u32, n: u32, first: u32, p0: u32, g: f32, dx: f32 };
+struct PosU { count: u32, n: u32, first: u32, qbase: u32, g: f32, dx: f32 };
 @group(0) @binding(0) var<uniform> pu: PosU;
 @group(0) @binding(1) var<storage, read> term: array<f32>;
 @group(0) @binding(2) var<storage, read_write> pos: array<f32>;
@@ -59,7 +65,7 @@ fn positions(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgro
   if (i >= pu.count) { return; }
   let n = pu.n;
   let iz = i % n; let iy = (i / n) % n; let ix = i / (n * n);
-  var b = vec3<f32>(f32(ix), f32(iy), f32(iz)) * pu.dx;
+  var b = vec3<f32>(f32(ix), f32(iy), f32(iz)) * (pu.dx * f32(pu.qbase));
   if (pu.first == 0u) { b = vec3<f32>(pos[3u * i], pos[3u * i + 1u], pos[3u * i + 2u]); }
   let s = vec3<f32>(term[3u * i], term[3u * i + 1u], term[3u * i + 2u]);
   let r = b + pu.g * s;
@@ -274,12 +280,40 @@ fn maps(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
 }
 `;
 
+// min / max / max|grad|^2 of a potential (4th-order central differences, periodic): the Hopf-Cole window statistics
+const STATS_SHADERS = /* wgsl */`
+${RED_PRELUDE}
+@group(0) @binding(2) var<storage, read> fld: array<f32>;
+fn at3(x: i32, y: i32, z: i32, n: u32) -> f32 {
+  let m = i32(n) - 1;
+  return fld[(u32(x & m) * n + u32(y & m)) * n + u32(z & m)];
+}
+@compute @workgroup_size(256)
+fn st_phi(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>,
+          @builtin(local_invocation_index) lid: u32, @builtin(workgroup_id) wid: vec3<u32>) {
+  let i = linear_id(gid, nwg, 256u);
+  var v = ident(ru.ops);
+  if (i < ru.count) {
+    let n = ru.n;
+    let x = i32(i / (n * n)); let y = i32((i / n) % n); let z = i32(i % n);
+    let s = f32(n) / 12.0;
+    let gx = (8.0 * (at3(x + 1, y, z, n) - at3(x - 1, y, z, n)) - (at3(x + 2, y, z, n) - at3(x - 2, y, z, n))) * s;
+    let gy = (8.0 * (at3(x, y + 1, z, n) - at3(x, y - 1, z, n)) - (at3(x, y + 2, z, n) - at3(x, y - 2, z, n))) * s;
+    let gz = (8.0 * (at3(x, y, z + 1, n) - at3(x, y, z - 1, n)) - (at3(x, y, z + 2, n) - at3(x, y, z - 2, n))) * s;
+    let f = fld[i];
+    v = vec4<f32>(f, f, gx * gx + gy * gy + gz * gz, 0.0);
+  }
+  red_store(v, lid, wid, nwg);
+}
+`;
+
 const pipeCache = new WeakMap();
 function getPipelines(device) {
   let p = pipeCache.get(device);
   if (!p) {
     p = (async () => {
       const m = await compile(device, SHADERS, 'cosmo3d');
+      const ms = await compile(device, STATS_SHADERS, 'cosmo3d stats');
       const U = U_ENTRY, R = RO_ENTRY, W = RW_ENTRY;
       const mk = (name, entries) => makePipeline(device, m, name, entries, name);
       return {
@@ -292,6 +326,7 @@ function getPipelines(device) {
         bin: mk('bin', [U(0), R(1), R(2), R(3), R(4), W(5)]),
         maxabs: mk('maxabs', [U(0), R(1), W(2)]),
         maps: mk('maps', [U(0), R(1), R(2), W(3)]),
+        stPhi: makePipeline(device, ms, 'st_phi', stage1Layout(1), 'st_phi'),
       };
     })();
     pipeCache.set(device, p);
@@ -317,7 +352,9 @@ export class GpuCosmo3D {
     this.bgs = new Map();
     this.binTables = new Map();
     this.gmax = 0; this.phiRange = 0;
+    this.pstat = {};                         // potential name -> {gmax, range}: window statistics of 'phi0', 'phi-eff'
     this.hasPhi0 = false; this.hasRef = false;
+    this.red = new Reducer(device, n * n * n);
     this.destroyed = false;
     this.lastTimings = {};
   }
@@ -325,6 +362,7 @@ export class GpuCosmo3D {
   async init() {
     this.P = await getPipelines(this.device);
     await this.fft.init();
+    await this.red.init();
     return this;
   }
 
@@ -354,11 +392,15 @@ export class GpuCosmo3D {
   _submit(enc) { this.device.queue.submit([enc.finish()]); }
 
   // ------------------------------------------------------------------ uploads
+  /** Drop the bind groups that reference term buffers (they are rebuilt lazily). */
+  _dropTermBindGroups() {
+    for (const k of [...this.bgs.keys()]) if (/^(pos|disp|sc)/.test(k)) this.bgs.delete(k);
+  }
   /** Upload the LPT term fields (interleaved xyz, 3 n^3 floats each) and their orders. Replaces previous terms. */
   async uploadTerms(terms, orders) {
     const d = this.device;
     for (const b of this.terms) b.destroy();
-    for (const k of [...this.bgs.keys()]) if (k.startsWith('pos')) this.bgs.delete(k);
+    this._dropTermBindGroups();
     this.terms = []; this.orders = orders.slice();
     d.pushErrorScope('out-of-memory');
     d.pushErrorScope('validation');
@@ -372,28 +414,37 @@ export class GpuCosmo3D {
     const oe = await d.popErrorScope();
     if (ve || oe) throw new Error('GPU buffer allocation failed for the LPT terms: ' + (oe ? oe.message : ve.message));
   }
+  /** Take ownership of term buffers built on the GPU (GpuLpt3D.build); the previous ones are destroyed. */
+  installTerms(bufs, orders) {
+    for (const b of this.terms) b.destroy();
+    this._dropTermBindGroups();
+    this.terms = bufs.slice(); this.orders = orders.slice();
+  }
 
-  /** Upload the Lagrangian potential (laplacian phi = delta0) and the window-size statistics. */
-  setPhi0(phi) {
-    const n = this.n, N = this.size;
-    if (phi.length !== N) throw new Error('setPhi0: wrong length');
+  /**
+   * Upload the Lagrangian potential (laplacian phi = delta0) into the 'phi0' source and measure its window statistics on the
+   * GPU (max |grad phi| with 4th-order differences, value range).  Async: the statistics need one small readback.
+   */
+  async setPhi0(phi) {
+    if (phi.length !== this.size) throw new Error('setPhi0: wrong length');
     this.device.queue.writeBuffer(this.buf('phi0', this.fbytes), 0, phi);
-    // max |grad phi| (4th-order central differences) and the exponent range
-    let g2 = 0, lo = Infinity, hi = -Infinity;
-    const s = n / 12;                    // 1/(12 dx)
-    const idx = (i, j, k) => ((i & (n - 1)) * n + (j & (n - 1))) * n + (k & (n - 1));
-    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) for (let k = 0; k < n; k++) {
-      const v = phi[(i * n + j) * n + k];
-      if (v < lo) lo = v; if (v > hi) hi = v;
-      const gx = (8 * (phi[idx(i + 1, j, k)] - phi[idx(i - 1, j, k)]) - (phi[idx(i + 2, j, k)] - phi[idx(i - 2, j, k)])) * s;
-      const gy = (8 * (phi[idx(i, j + 1, k)] - phi[idx(i, j - 1, k)]) - (phi[idx(i, j + 2, k)] - phi[idx(i, j - 2, k)])) * s;
-      const gz = (8 * (phi[idx(i, j, k + 1)] - phi[idx(i, j, k - 1)]) - (phi[idx(i, j, k + 2)] - phi[idx(i, j, k - 2)])) * s;
-      const q = gx * gx + gy * gy + gz * gz;
-      if (q > g2) g2 = q;
-    }
-    this.gmax = Math.sqrt(g2) * 1.02;      // small margin: the CPU reference uses spectral gradients
-    this.phiRange = hi - lo;
-    this.hasPhi0 = true;
+    await this.potentialStats('phi0');
+  }
+
+  /** Measure {gmax, range} of the potential held in the named scratch buffer ('phi0' | 'phi-eff') and register it. */
+  async potentialStats(name, encoder = null) {
+    const enc = encoder || this.device.createCommandEncoder({ label: 'potential stats' });
+    this.red.run(enc, this.P.stPhi, [this.buf(name, this.fbytes)], this.size, 0, [OP.MIN, OP.MAX, OP.MAX, OP.SUM], { n: this.n }, 'phi stats');
+    const r = await this.red.read(1, enc);
+    this.setPotentialStats(name, r);
+    return this.pstat[name];
+  }
+  /** Register the statistics from a reduction result [lo, hi, max|grad|^2, _]. */
+  setPotentialStats(name, r, off = 0) {
+    const st = { gmax: Math.sqrt(Math.max(0, r[off + 2])) * 1.02, range: r[off + 1] - r[off] };    // small margin: the CPU reference uses spectral gradients
+    this.pstat[name] = st;
+    if (name === 'phi0') { this.gmax = st.gmax; this.phiRange = st.range; this.hasPhi0 = true; }
+    return st;
   }
 
   /** Upload a CPU field into the shared scratch field buffer and return it. */
@@ -414,22 +465,25 @@ export class GpuCosmo3D {
   // ------------------------------------------------------------------ positions, CIC
   /**
    * x = q + sum_t g_t S^t over the terms with order <= `order` (q = grid coordinates, unwrapped).
-   * gvals[t] is g_t(D) for ALL uploaded terms (WASM: term_g(D)).
+   * gvals[t] is g_t(D) for ALL uploaded terms (WASM: term_g(D); GPU-built terms: term_g_unmerged(D)).
    */
-  positions(gvals, order, encoder = null) {
+  positions(gvals, order, encoder = null) { return this._sumTerms('pos', gvals, order, 1, encoder); }
+  /** Psi = sum_t g_t S^t (displacement, box units, interleaved xyz) into the persistent buffer 'disp'. */
+  displacement(gvals, order, encoder = null, name = 'disp') { return this._sumTerms(name, gvals, order, 0, encoder); }
+  _sumTerms(name, gvals, order, qbase, encoder) {
     const own = !encoder;
-    const enc = encoder || this.device.createCommandEncoder({ label: 'positions' });
-    const pos = this.buf('pos', 3 * this.fbytes);
+    const enc = encoder || this.device.createCommandEncoder({ label: name });
+    const out = this.buf(name, 3 * this.fbytes);
     let first = true;
     for (let t = 0; t < this.terms.length; t++) {
       if (this.orders[t] > order) continue;
-      const g = this.bg('pos' + t, this.P.positions, [this.ring.resource(32), this.terms[t], pos]);
-      this._dispatch(enc, 'positions', this.P.positions, g, [['u', this.size], ['u', this.n], ['u', first ? 1 : 0], 0, gvals[t], 1 / this.n], this.size, 'positions t' + t);
+      const g = this.bg(name + t, this.P.positions, [this.ring.resource(32), this.terms[t], out]);
+      this._dispatch(enc, name, this.P.positions, g, [['u', this.size], ['u', this.n], ['u', first ? 1 : 0], ['u', qbase], gvals[t], 1 / this.n], this.size, name + ' t' + t);
       first = false;
     }
     if (first) throw new Error('positions: no LPT term with order <= ' + order);
     if (own) this._submit(enc);
-    return pos;
+    return out;
   }
 
   /** CIC deposit of n^3 unit-mass particles; returns rho/rhobar (mean exactly 1). Positions are wrapped here. */
@@ -448,41 +502,43 @@ export class GpuCosmo3D {
   }
 
   // ------------------------------------------------------------------ Hopf-Cole
-  /** Window half-width (cells) used for the given nu, D. */
-  hcWindow(nu, D) {
-    const reach = D * this.gmax + 6 * Math.sqrt(2 * nu * D);
+  /** Window half-width (cells) used for the given nu, D and potential source. */
+  hcWindow(nu, D, src = 'phi0') {
+    const reach = D * this.pstat[src].gmax + 6 * Math.sqrt(2 * nu * D);
     return Math.min(this.n / 2, Math.ceil(reach * this.n) + 2);
   }
   /** Exponent range (phi_max - phi_min)/(2 nu), the analogue of hc_exponent_range. */
-  hcExponentRange(nu) { return this.phiRange / (2 * nu); }
+  hcExponentRange(nu, src = 'phi0') { return this.pstat[src].range / (2 * nu); }
 
   /**
    * Real-space log-domain Hopf-Cole solve (refine = 1).  Returns {delta, phi, w} with delta = det(I - D H) - 1,
    * H = Hessian of phi = Phi_v = -2 nu ln psi (up to an additive constant).
+   * `src` names the potential: 'phi0' (Zel'dovich, setPhi0) or 'phi-eff' (nLPT effective potential, GpuLpt3D.legendre);
+   * its window statistics must be registered (setPhi0 / potentialStats).
    */
-  hopfCole(nu, D, encoder = null) {
-    if (!this.hasPhi0) throw new Error('hopfCole: call setPhi0 first');
+  hopfCole(nu, D, encoder = null, src = 'phi0') {
+    if (!this.pstat[src]) throw new Error(`hopfCole: potential '${src}' has no statistics (call setPhi0 / potentialStats first)`);
     const own = !encoder;
     const enc = encoder || this.device.createCommandEncoder({ label: 'hopf-cole' });
     const n = this.n, N = this.size, dx = 1 / n;
     const A = this.buf('hcA', this.fbytes), B = this.buf('hcB', this.fbytes);
     const phi = this.buf('hc-phi', this.fbytes), delta = this.buf('hc-delta', this.fbytes);
-    const phi0 = this.buf('phi0', this.fbytes);
-    const w = this.hcWindow(nu, D);
+    const phi0 = this.buf(src, this.fbytes);
+    const w = this.hcWindow(nu, D, src);
     const u = (stride, s) => [['u', N], ['u', n], ['u', stride], ['u', w], 1 / (4 * nu * D), dx * dx, s, D];
     const R = this.ring.resource(32);
     // a = phi0 / (2 nu)
-    this._dispatch(enc, 'hc', this.P.hcScale, this.bg('hc-in', this.P.hcScale, [R, phi0, A]), u(1, 1 / (2 * nu)), N, 'hc a');
-    let src = A, dst = B;
+    this._dispatch(enc, 'hc', this.P.hcScale, this.bg('hc-in-' + src, this.P.hcScale, [R, phi0, A]), u(1, 1 / (2 * nu)), N, 'hc a');
+    let cur = A, nxt = B;
     if (nu * D > 0) {
       for (const stride of [n * n, n, 1]) {
-        const g = this.bg('hc-lse' + (src === A ? 'AB' : 'BA'), this.P.hcLse, [R, src, dst]);
+        const g = this.bg('hc-lse' + (cur === A ? 'AB' : 'BA'), this.P.hcLse, [R, cur, nxt]);
         this._dispatch(enc, 'hc', this.P.hcLse, g, u(stride, 0), N, 'hc lse');
-        [src, dst] = [dst, src];
+        [cur, nxt] = [nxt, cur];
       }
     }
     // Phi_v = -2 nu ln psi
-    this._dispatch(enc, 'hc', this.P.hcScale, this.bg('hc-out' + (src === A ? 'A' : 'B'), this.P.hcScale, [R, src, phi]), u(1, -2 * nu), N, 'hc phi');
+    this._dispatch(enc, 'hc', this.P.hcScale, this.bg('hc-out' + (cur === A ? 'A' : 'B'), this.P.hcScale, [R, cur, phi]), u(1, -2 * nu), N, 'hc phi');
     this._dispatch(enc, 'hc', this.P.hcDelta, this.bg('hc-fd', this.P.hcDelta, [R, phi, delta]), u(1, 0), N, 'hc delta');
     if (own) this._submit(enc);
     return { delta, phi, w };
@@ -632,6 +688,6 @@ export class GpuCosmo3D {
     for (const b of this.bufs.values()) b.destroy();
     for (const T of this.binTables.values()) { T.permBuf.destroy(); T.chunkBuf.destroy(); T.partial.destroy(); }
     this.terms = []; this.bufs.clear(); this.bgs.clear(); this.binTables.clear();
-    this.fft.destroy();
+    this.fft.destroy(); this.red.destroy();
   }
 }

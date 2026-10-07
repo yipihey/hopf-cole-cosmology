@@ -5,7 +5,9 @@
 
 import { unpackSpectrum, unpackLoop, transpose2D } from '../hcc.js';
 import { GpuCosmo3D } from '../gpu/cosmo3d.js';
-import { getTerms, termGrowth } from '../gpu/terms.js';
+import { GpuLpt3D } from '../gpu/lpt3d.js';
+import { GpuSheet3D } from '../gpu/sheet3d.js';
+import { getUnmergedSpec } from '../gpu/terms.js';
 
 const MAX_CACHE_BYTES = 420e6;
 
@@ -24,7 +26,8 @@ export class Engine {
     this.sim = null;
     this.sig = '';
     this.gen = 0;
-    this.builtOrder = 0;
+    this.builtOrder = 0;           // highest order whose growth/term information is available (GPU path: growth tables, WASM path: LPT)
+    this.wOrder = 0;               // order of the LPT built in the WASM sim (the GPU path builds none unless it falls back)
     this.cache = new Map();
     this.cacheBytes = 0;
     this.timings = new Map();
@@ -34,10 +37,13 @@ export class Engine {
     // WebGPU compute path (3D only); see prepareGpu()
     this.gpuDev = null;           // GPUDevice shared with the viz layer (set by the app)
     this.g = null;                // GpuCosmo3D for the current grid
-    this.gTerms = null;           // {order, count} of the uploaded LPT terms
-    this.gTermInfo = null;        // {orders, source} of the uploaded terms
+    this.lpt = null;              // GpuLpt3D: nLPT build, D_sc, Legendre split (all on the GPU)
+    this.sheetG = null;           // GpuSheet3D: tetrahedral sheet density
+    this.gTerms = null;           // {order, count} of the GPU-built raw LPT terms
+    this.hsim = null;             // 8^3 helper CosmoSim: term list and growth functions g_tau(D) (grid independent), see ensureGrowth()
+    this.hsOrder = 0; this.gSpec = null; this.gvCache = new Map();
     this.gFresh = {};             // field name -> memo key of the field currently resident in the GPU scratch buffers
-    this.gPhiKey = null;          // which potential the GPU phi0 buffer holds: 'zel' or 'lpt<order>|<D>' (see gpuPhi)
+    this.gPhiKey = null;          // which Legendre source the GPU 'phi-eff' buffer holds: 'lpt<order>|<D>' (see gpuLegendre)
     this.ref = null;              // GPU-side reference spectra of delta0 (cross spectra, linear theory)
     this.gpuError = null; this.gpuFailed = false; this.gpuWanted = undefined;
     this.om = 1;                   // cosmology currently set on the sim (Omega_m)
@@ -58,8 +64,9 @@ export class Engine {
 
   dispose() {
     this.releaseGpu();
+    this.freeGrowthSim();
     if (this.sim) { try { this.sim.free(); } catch (e) { /* already freed */ } }
-    this.sim = null; this.builtOrder = 0;
+    this.sim = null; this.builtOrder = 0; this.wOrder = 0;
     this.cache.clear(); this.cacheBytes = 0;
   }
 
@@ -149,7 +156,7 @@ export class Engine {
     this.dim = dim; this.n = n;
     this.gaussian = P.ic === 'g';
     this.kf = this.sim.kf(); this.knyq = this.sim.knyq();
-    this.builtOrder = 0;
+    this.builtOrder = 0; this.wOrder = 0;
     return true;
   }
 
@@ -157,26 +164,33 @@ export class Engine {
   applyCosmology(om) {
     if (!this.sim || Math.abs(om - this.om) < 1e-12) return false;
     this.sim.set_cosmology(om);
-    this.om = om; this.builtOrder = 0;
-    this.gTerms = null; this.gTermInfo = null; this.gFresh = {}; this.gPhiKey = null;
+    this.om = om; this.builtOrder = 0; this.wOrder = 0;
+    // the raw LPT term fields S^tau on the GPU do not depend on the cosmology (only g_tau(D) does): they are kept,
+    // the growth helper is rebuilt for the new cosmology, and everything derived from g_tau is dropped
+    this.freeGrowthSim();
+    this.gFresh = {}; this.gPhiKey = null;
     this.cache.clear(); this.cacheBytes = 0; this.gen++;    // also cancels in-flight GPU work (guarded by gen)
     return true;
   }
-  /** Largest reachable D (Infinity in EdS; needs a built LPT). */
-  dMax() { return this.sim && this.builtOrder > 0 ? this.sim.d_max() : Infinity; }
+  /** The CosmoSim answering growth queries: the 8^3 helper on the 3-D GPU path (no WASM LPT is built there), else the sim itself. */
+  gsim() { return this.useGpuLpt() ? this.hsim : this.sim; }
+  /** Largest reachable D (Infinity in EdS; needs the growth tables). */
+  dMax() { const s = this.gsim(); return s && this.builtOrder > 0 ? s.d_max() : Infinity; }
   /** Scale factor and Omega_m(a) at growth factor D. */
   cosmoAt(D) {
-    if (!this.sim || this.builtOrder === 0) return { a: D, om: 1 };
-    const a = this.sim.a_of_d(D), o = this.om;
+    const s = this.gsim();
+    if (!s || this.builtOrder === 0) return { a: D, om: 1 };
+    const a = s.a_of_d(D), o = this.om;
     const e2 = o / (a * a * a) + (1 - o);
     return { a, om: o / (a * a * a) / e2 };
   }
   /** LPT growth bookkeeping: [{label, order, g}] with g = g_tau(D)/D^order for the terms up to `order`. */
   termGrowth(D, order) {
-    if (!this.sim || this.builtOrder === 0) return [];
-    const labels = this.memo(['tlabels', this.builtOrder], () => Array.from(this.sim.term_labels()));
-    const orders = this.memo(['torders', this.builtOrder], () => Array.from(this.sim.term_orders()));
-    const g = this.sim.term_growth(Math.max(D, 1e-6));
+    const s = this.gsim();
+    if (!s || this.builtOrder === 0) return [];
+    const labels = this.memo(['tlabels', this.builtOrder], () => Array.from(s.term_labels()));
+    const orders = this.memo(['torders', this.builtOrder], () => Array.from(s.term_orders()));
+    const g = s.term_growth(Math.max(D, 1e-6));
     const out = [], seen = {}, total = {};
     for (let t = 0; t < g.length; t++) total[orders[t]] = (total[orders[t]] || 0) + 1;
     for (let t = 0; t < g.length; t++) {
@@ -189,7 +203,9 @@ export class Engine {
   /** Velocity-jump estimate max|u| - min|u| of the 1LPT (Zel'dovich) velocity; D-independent (u = S1). */
   velocityJump() {
     if (!this.sim || this.builtOrder < 1) return NaN;
+    if (this.useGpuLpt()) { const v = this.peek(['du']); return v === undefined ? NaN : v; }   // seeded by prepareGpu
     return this.memo(['du'], () => {
+      this.ensureWasm(1);
       const v = this.sim.velocities(1.0, 1), d = this.dim, N = v.length / d;
       let lo = Infinity, hi = 0;
       for (let i = 0; i < N; i++) {
@@ -200,12 +216,63 @@ export class Engine {
     });
   }
 
+  /**
+   * Make the LPT information for `order` available.  GPU path: only the growth tables/term list (helper sim, milliseconds); the
+   * fields are built on the GPU by prepareGpu.  WASM path: build_lpt.
+   */
   ensureLpt(order) {
-    if (this.builtOrder >= order) return false;
+    if (this.useGpuLpt()) {
+      this.ensureGrowth(order);
+      const ch = this.builtOrder < order;
+      this.builtOrder = Math.max(this.builtOrder, order);
+      return ch;
+    }
+    const ch = this.wOrder < order;
+    this.ensureWasm(order);
+    this.builtOrder = this.wOrder;
+    return ch;
+  }
+  /** Build the LPT in the WASM sim (every WASM-only consumer calls this first; a no-op when already built). */
+  ensureWasm(order) {
+    if (this.wOrder >= order) return false;
     this.time('LPT' + order, () => this.sim.build_lpt(order));
-    this.builtOrder = order;
+    this.wOrder = order;
+    if (!this.useGpuLpt()) this.builtOrder = Math.max(this.builtOrder, order);
     return true;
   }
+
+  // -- growth helper (3D GPU path) -------------------------------------------------------------
+  // The raw LPT term list and the growth functions g_tau(D) depend on (order, cosmology) only, not on the grid: a CosmoSim on
+  // an 8^3 grid with build_lpt(order) provides term_specs_unmerged, EdS coefficients, term_g (EdS D^n or the LCDM tables), d_max,
+  // a_of_d, labels - so the 3-D GPU path never has to build the (seconds-long) WASM LPT at the lab grid size.
+  freeGrowthSim() {
+    if (this.hsim) { try { this.hsim.free(); } catch (e) { /* ignore */ } }
+    this.hsim = null; this.hsOrder = 0; this.gSpec = null; this.gvCache.clear();
+  }
+  ensureGrowth(order) {
+    if (!this.hsim) {
+      this.hsim = new this.core.CosmoSim(3, 8, 1.0);
+      if (Math.abs(this.om - 1) > 1e-12) this.hsim.set_cosmology(this.om);
+      this.hsOrder = 0;
+    }
+    if (this.hsOrder < order) {
+      this.time('growth tables', () => { this.hsim.build_lpt(order); this.gSpec = getUnmergedSpec(this.hsim); });
+      this.hsOrder = order; this.gvCache.clear();
+    }
+  }
+  /** g_tau(D) of the GPU-built raw terms (EdS: c_tau D^order; LCDM: the integrated tables). */
+  gGvals(D) {
+    const key = String(D);
+    let v = this.gvCache.get(key);
+    if (v) return v;
+    const spec = this.gSpec;
+    v = spec.eds ? spec.orders.map((o, t) => spec.coefs[t] * Math.pow(D, o)) : Array.from(this.hsim.term_g(D));
+    if (this.gvCache.size > 96) this.gvCache.clear();
+    this.gvCache.set(key, v);
+    return v;
+  }
+  /** True when the 3-D GPU path owns the LPT (no WASM build). */
+  useGpuLpt() { return this.dim === 3 && !!this.gpuWanted && !!this.gpuDev && !this.gpuFailed && !!this.sim; }
 
   // -- WebGPU compute path (3D) ---------------------------------------------------------------
   //
@@ -227,9 +294,10 @@ export class Engine {
   gpuActive(P) { return P.mode === 3 && !!P.gc && !!this.gpuDev && !this.gpuFailed && this.dim === 3; }
 
   releaseGpu() {
+    for (const o of [this.sheetG, this.lpt]) if (o && o.destroy) { try { o.destroy(); } catch (e) { console.warn('[engine] GPU destroy:', e); } }
     if (this.g) { try { this.g.destroy(); } catch (e) { console.warn('[engine] GPU destroy:', e); } }
     const had = !!this.g || !!this.ref;
-    this.g = null; this.gTerms = null; this.gTermInfo = null; this.ref = null; this.gFresh = {}; this.gPhiKey = null;
+    this.g = null; this.lpt = null; this.sheetG = null; this.gTerms = null; this.ref = null; this.gFresh = {}; this.gPhiKey = null;
     // GPU-derived cache entries and in-flight GPU work (guarded by `gen`) are stale now
     if (had) { this.cache.clear(); this.cacheBytes = 0; this.gen++; }
   }
@@ -240,13 +308,15 @@ export class Engine {
     this.gpuWanted = on;
     this.gpuFailed = false; this.gpuError = null;
     if (!on) this.releaseGpu();
+    this.builtOrder = on ? 0 : this.wOrder;       // the owner of the LPT changes: ensureLpt re-establishes it
     this.cache.clear(); this.cacheBytes = 0; this.gen++;
   }
 
   /**
-   * Create the GpuCosmo3D for the current grid and upload what it needs: phi0 (once per IC), the LPT term
-   * fields (once per LPT build) and the FFT of delta0 (reference spectra, once per IC).  Returns true when
-   * the GPU path is ready; on any failure the GPU path is disabled for this IC and the WASM path takes over.
+   * Prepare the GPU path for the applied parameters: create the GPU objects for the current grid (once), the FFT of delta0 for the
+   * reference spectra (once per IC), and build the raw LPT term fields S^tau on the GPU from delta0 (once per IC and order
+   * increase; changing the cosmology or lowering the order needs no rebuild).  Returns true when the GPU path is ready; on any
+   * failure the GPU path is disabled for this IC and the WASM path takes over.
    */
   prepareGpu(P) { return this.gpuSerial(() => this._prepareGpu(P)); }
   async _prepareGpu(P) {
@@ -255,71 +325,90 @@ export class Engine {
     try {
       if (!this.g || this.g.n !== this.n) {
         this.releaseGpu();
-        this.g = await this.timeAsync('GPU init', async () => { const g = new GpuCosmo3D(this.gpuDev, this.n); await g.init(); return g; });
-      }
-      const g = this.g;
-      if (!g.hasPhi0) this.time('GPU phi0', () => { g.setPhi0(this.sim.phi0()); this.gPhiKey = 'zel'; });
-      if (!this.gTerms || this.gTerms.order < this.builtOrder) {
-        await this.timeAsync('GPU terms', async () => {
-          const T = getTerms(this.sim, this.n);
-          await g.uploadTerms(T.terms, T.orders);
-          await g.sync();
-          this.gTerms = { order: this.builtOrder, count: T.orders.length };
-          this.gTermInfo = { orders: T.orders, source: T.source };
+        await this.timeAsync('GPU init', async () => {
+          const g = new GpuCosmo3D(this.gpuDev, this.n); await g.init();
+          const lpt = new GpuLpt3D(g); await lpt.init();
+          const sh = new GpuSheet3D(g); await sh.init();
+          this.g = g; this.lpt = lpt; this.sheetG = sh;
         });
       }
+      const g = this.g;
+      this.ensureLpt(P.order);
       if (!this.ref) {
         await this.timeAsync('GPU ref', async () => {
-          const d0 = this.memo(['d0'], () => this.sim.linear_delta(1.0));
+          const d0 = this.sim.linear_delta(1.0);
           const an = await g.setReference(d0, this.nbins);      // FFT kept on the GPU for cross spectra; maps
           // linear P(k) from the f64 CPU FFT (once per IC): the f32 GPU FFT is noisy where P < 1e-17 of its peak
           const pk = unpackSpectrum(this.sim.power_spectrum(d0, this.nbins, false));
           this.ref = { d0, pk, maps: an.maps };
         });
       }
+      if (!this.gTerms || this.gTerms.order < P.order) {
+        await this.timeAsync('GPU nLPT build', async () => {
+          const r = await this.lpt.build(this.ref.d0, this.gSpec, P.order);
+          this.gTerms = { order: P.order, count: r.count };
+          this.gPhiKey = null;               // phi-eff of the previous build is stale
+        });
+      }
+      if (gen === this.gen && this.peek(['du']) === undefined) {
+        const du = await this.timeAsync('|S1| range', () => this.lpt.velocityJump());
+        if (gen === this.gen) this.seed(['du'], du);
+      }
       if (gen !== this.gen) return false;
       this.lastPath = 'GPU';
       return true;
     } catch (err) {
       if (gen !== this.gen) return false;      // the IC changed under us (buffers destroyed): not a GPU failure
-      console.error('[engine] GPU compute path failed, falling back to WASM:', err);
-      this.gpuError = (err && err.message) || String(err);
-      this.gpuFailed = true;
-      this.releaseGpu();
-      this.lastPath = 'WASM';
+      this.gpuFailure(err);
       return false;
     }
   }
 
-  /** Immediately-needed density field on the GPU path (CIC or Hopf-Cole), read back to the CPU and cached. */
+  /** Immediately-needed density field on the GPU path (CIC, tetrahedral sheet or Hopf-Cole), read back to the CPU and cached. */
   async _gpuField(which, P) {
-    if (!this.gpuActive(P) || !this.g) return;
+    if (!this.gpuActive(P) || !this.g || !this.gTerms) return;
     const g = this.g, gen = this.gen;
+    const order = Math.min(P.order, this.gTerms.order);
     try {
       if (which === 'cic') {
         const key = ['cic', P.D, P.order];
         if (this.peek(key) !== undefined) return;
-        const order = Math.min(P.order, this.builtOrder);
         const rho = await this.timeAsync('CIC (GPU)', async () => {
-          const pos = g.positions(termGrowth(this.sim, this.gTermInfo.orders, P.D), order);
+          const pos = g.positions(this.gGvals(P.D), order);
           return g.readField(g.cicDensity(pos));
         });
         if (gen !== this.gen) return;
         this.seed(key, rho);
         this.gFresh.cic = key.join('|');
-      } else if (Engine.isHc(which) && P.me === 1) {
-        const src = this.hcSrcOf(which, P), tag = this.hcTag(P, src);
-        if (tag.startsWith('lptT')) return;          // transverse-corrected Legendre inversion: WASM only
-        const key = this.hcKey(P, src);
+      } else if (which === 'sheet') {
+        const key = ['sheet', P.D, P.order];
         if (this.peek(key) !== undefined) return;
-        let range = 0;
-        const delta = await this.timeAsync('Hopf-Cole (GPU)', async () => {
-          this.gpuPhi(P, tag);
-          const d = await g.readField(g.hopfCole(P.nu, P.D).delta);
-          range = g.hcExponentRange(P.nu);
-          return d;
+        const rho = await this.timeAsync('sheet (tetra, GPU)', async () => {
+          const disp = g.displacement(this.gGvals(P.D), order);
+          return g.readField(this.sheetG.density(disp));
         });
         if (gen !== this.gen) return;
+        this.seed(key, rho);
+        this.gFresh.sheet = key.join('|');
+      } else if (Engine.isHc(which) && P.me === 1) {
+        const src = this.hcSrcOf(which, P), tag = this.hcTag(P, src);
+        const key = this.hcKey(P, src);
+        if (this.peek(key) !== undefined) return;
+        const trans = tag.startsWith('lptT');
+        let range = 0;
+        const delta = await this.timeAsync(tag === 'zel' ? 'Hopf-Cole (GPU)' : trans ? 'Hopf-Cole (GPU, Legendre + transverse)' : 'Hopf-Cole (GPU, Legendre)', async () => {
+          const psrc = tag === 'zel' ? 'phi0' : 'phi-eff';
+          if (tag !== 'zel') await this.gpuLegendre(P, order, gen);
+          if (gen !== this.gen) return null;
+          const enc = this.gpuDev.createCommandEncoder({ label: 'hopf-cole' });
+          const hc = g.hopfCole(P.nu, P.D, enc, psrc);
+          if (trans) this.lpt.transverse(P.D, enc);
+          this.gpuDev.queue.submit([enc.finish()]);
+          const d = await g.readField(hc.delta);
+          range = g.hcExponentRange(P.nu, psrc);
+          return d;
+        });
+        if (gen !== this.gen || !delta) return;
         this.seed(key, { delta, nuEff: P.nu, range, floor: 1 / (this.n * this.n * 4 * Math.max(P.D, 1e-12)), ratio: NaN });
         this.gFresh.hc = key.join('|');              // the single hc scratch buffer now holds this field
       }
@@ -327,17 +416,34 @@ export class Engine {
   }
 
   /**
-   * Make the GPU phi0 buffer hold the potential of the Hopf-Cole source `tag`: the 1LPT potential ('zel') or the
-   * order-n effective longitudinal potential phi_eff(D) of the nLPT map (Psi_L = -D grad phi_eff), computed by WASM
-   * and uploaded; the GPU Hopf-Cole then runs on it unchanged.  phi_eff depends on D, so it is re-uploaded per D.
+   * Make the GPU 'phi-eff' buffer hold the effective longitudinal potential of the order-`order` map at P.D (Psi_L = -D grad phi_eff;
+   * Helmholtz split of Psi(D) = sum g_tau S^tau on the GPU, also giving Psi_T) and cache rms|Psi_T|/rms|Psi_L|.
+   * It depends on D, order and cosmology (the latter resets gPhiKey), not on nu.
    */
-  gpuPhi(P, tag) {
-    const want = tag === 'zel' ? 'zel' : tag + '|' + P.D;
-    if (this.gPhiKey === want && this.g.hasPhi0) return;
-    this.ensureLpt(P.order);
-    const phi = tag === 'zel' ? this.sim.phi0() : this.sim.lpt_potential(P.D, P.order);
-    this.g.setPhi0(phi);
+  async gpuLegendre(P, order, gen) {
+    const want = 'lpt' + order + '|' + P.D;
+    if (this.gPhiKey === want && this.g.pstat['phi-eff']) return;
+    const r = await this.timeAsync('Legendre split (GPU)', () => this.lpt.legendre(this.gGvals(P.D), order, P.D));
+    if (gen !== this.gen) return;
     this.gPhiKey = want;
+    this.seed(['psit', P.D, P.order], r.frac);
+  }
+
+  /** First shell-crossing times D_sc(P.order) and D_sc(1) on the GPU (batched Jacobian minima), cached in the memo. */
+  async needDsc(P) {
+    if (!this.gpuActive(P) || !this.g || !this.gTerms) return;
+    await this.gpuSerial(() => this._gpuDsc(P));
+  }
+  async _gpuDsc(P) {
+    const gen = this.gen, dmax = this.dMax();
+    try {
+      for (const o of new Set([P.order, 1])) {
+        if (this.peek(['dsc', o]) !== undefined) continue;
+        const v = await this.timeAsync('D_sc' + o + ' (GPU)', () => this.lpt.shellCrossing(Math.min(o, this.gTerms.order), (D) => this.gGvals(D), dmax));
+        if (gen !== this.gen) return;
+        this.seed(['dsc', o], v);
+      }
+    } catch (err) { if (gen === this.gen) this.gpuFailure(err); }
   }
 
   /**
@@ -357,7 +463,9 @@ export class Engine {
       const g = this.g, fkey = this.fieldKey(which, P).join('|');
       let buf, offset = 0;
       const hcLike = Engine.isHc(which);
-      if ((which === 'cic' && this.gFresh.cic === fkey) || (hcLike && this.gFresh.hc === fkey)) { buf = which === 'cic' ? g.buf('rho') : g.buf('hc-delta'); offset = which === 'cic' ? 1 : 0; }
+      if (which === 'cic' && this.gFresh.cic === fkey) { buf = g.buf('rho'); offset = 1; }
+      else if (which === 'sheet' && this.gFresh.sheet === fkey) { buf = g.buf('sheet-rho'); offset = 1; }
+      else if (hcLike && this.gFresh.hc === fkey) buf = g.buf('hc-delta');
       else buf = g.uploadField(this.delta(which, P));
       const an = await this.timeAsync('FFT + spectra (GPU)', async () => g.analyze(buf, { nbins: this.nbins, maps: true, cross: true, offset }));
       if (gen !== this.gen) return;
@@ -378,6 +486,7 @@ export class Engine {
     this.gpuFailed = true;
     this.lastPath = 'WASM';
     this.releaseGpu();
+    this.builtOrder = this.wOrder;          // the WASM sim owns the LPT again (consumers build it on demand)
   }
 
   /**
@@ -399,15 +508,15 @@ export class Engine {
 
   // -- fields --------------------------------------------------------------------
 
-  positions(P) { return this.sim.positions(P.D, Math.min(P.order, this.builtOrder)); }
+  positions(P) { this.ensureWasm(P.order); return this.sim.positions(P.D, Math.min(P.order, this.wOrder)); }
 
   sheet(P) {
-    // 2D: 2x2 supersampled triangles; 3D: six Kuhn tetrahedra per Lagrangian cell, point-sampled (CPU only, ~1 s at 64^3)
-    return this.memo(['sheet', P.D, P.order], () => this.time(this.dim === 3 ? 'sheet (tetra, CPU)' : 'sheet', () =>
-      this.sim.sheet_density(P.D, P.order, this.n, this.dim === 3 ? 1 : 2)));
+    // 2D: 2x2 supersampled triangles; 3D: six Kuhn tetrahedra per Lagrangian cell, point-sampled (GPU path: seeded by _gpuField; WASM ~1 s at 64^3)
+    return this.memo(['sheet', P.D, P.order], () => { this.ensureWasm(P.order); return this.time(this.dim === 3 ? 'sheet (tetra, CPU)' : 'sheet', () =>
+      this.sim.sheet_density(P.D, P.order, this.n, this.dim === 3 ? 1 : 2)); });
   }
   cic(P) {
-    return this.memo(['cic', P.D, P.order], () => this.time('CIC', () => this.sim.cic_density(P.D, P.order, this.n)));
+    return this.memo(['cic', P.D, P.order], () => { this.ensureWasm(P.order); return this.time('CIC', () => this.sim.cic_density(P.D, P.order, this.n)); });
   }
   linear(P) {
     // GPU path: delta_lin = D delta0 exactly, so reuse the cached delta0 instead of an FFT per D
@@ -421,7 +530,7 @@ export class Engine {
       const s = this.sim;
       let ratio = 0;
       if (tag === 'zel') s.hopf_cole(P.D, P.nu, P.me, P.mx);
-      else { this.ensureLpt(P.order); ratio = s.hopf_cole_lpt(P.D, P.order, P.nu, P.me, P.mx, tag.startsWith('lptT')); }
+      else { this.ensureWasm(P.order); ratio = s.hopf_cole_lpt(P.D, P.order, P.nu, P.me, P.mx, tag.startsWith('lptT')); }
       const r = { delta: s.hc_delta(), nuEff: s.hc_nu_eff(), range: s.hc_exponent_range(), floor: s.hc_nu_floor(), ratio };
       if (this.dim === 2) {
         r.phi = s.hc_phi(); r.lnpsi = s.hc_lnpsi(); r.psihat = s.hc_psihat_log(); r.vel = s.hc_velocity();
@@ -432,26 +541,25 @@ export class Engine {
   /** rms|Psi_T| / rms|Psi_L| of the order-P.order displacement at D (0 up to 2LPT); D-dependent, ν-independent. */
   psiT(P) {
     if (P.order <= 2) return 0;
-    return this.memo(['psit', P.D, P.order], () => {
-      this.ensureLpt(P.order);
+    return this.memo(['psit', P.D, P.order], () => {       // GPU path: seeded by gpuLegendre
+      this.ensureWasm(P.order);
       return this.time('Psi_T/Psi_L', () => this.sim.hopf_cole_lpt(P.D, P.order, 1e-2, 0, 30, true));
     });
   }
   jacobian(P) {
-    return this.memo(['jac', P.D, P.order], () => this.time('Jacobian', () => this.sim.jacobian(P.D, P.order)));
+    return this.memo(['jac', P.D, P.order], () => { this.ensureWasm(P.order); return this.time('Jacobian', () => this.sim.jacobian(P.D, P.order)); });
   }
   div(P, nth) {
-    this.ensureLpt(Math.max(nth, P.order));
+    this.ensureWasm(Math.max(nth, P.order));
     return this.memo(['div', nth], () => this.sim.lpt_div(nth));
   }
   curl(P, nth) {
-    this.ensureLpt(Math.max(nth, P.order));
+    this.ensureWasm(Math.max(nth, P.order));
     return this.memo(['curl', nth], () => this.sim.lpt_curl(nth, 0));
   }
   /** First shell-crossing D for the given order (Infinity if none). */
   dsc(order) {
-    this.ensureLpt(order);
-    return this.memo(['dsc', order], () => this.time('D_sc' + order, () => this.sim.shell_crossing(order)));
+    return this.memo(['dsc', order], () => { this.ensureWasm(order); return this.time('D_sc' + order, () => this.sim.shell_crossing(order)); });   // GPU path: seeded by needDsc
   }
 
   /** Parameter parts identifying a density-like field. */
