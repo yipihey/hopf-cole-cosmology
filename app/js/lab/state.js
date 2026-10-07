@@ -103,7 +103,7 @@ export function encodeHash(S) {
       case 'bool': s = bool(v); break;
       case 'num': s = num(v); break;
       case 'ivec': s = v.join('_'); break;
-      case 'slots': s = v.map((q) => q.join('.')).join('_'); break;
+      case 'slots': s = v.map((q) => q.join('.').replace(/\.+$/, '')).join('_'); break;
       case 'list': s = v.join('_') || '-'; break;
       default: s = String(v);
     }

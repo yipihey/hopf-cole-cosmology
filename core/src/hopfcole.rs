@@ -8,7 +8,7 @@
 //! adhesion model.  The Eulerian density follows from the inverse Lagrangian
 //! map q = x - D u(x,D):  1+δ = det(∂q/∂x) = det(I - D ∇∇Φ)  (single-stream).
 
-use crate::fft::{hessian_component, FftEngine};
+use crate::fft::FftEngine;
 use crate::grid::Grid;
 use crate::lpt::det_i_plus;
 use num_complex::Complex64 as C64;
@@ -195,20 +195,24 @@ pub fn hopf_cole_solve(grid: &Grid, eng: &mut FftEngine, phi: &[f64], nu: f64, d
         }
     };
     let exponent_range = range / (2.0 * nu_eff);
-    // Φ_v = -2ν ln ψ ; velocity u = ∇Φ_v ; Hessian H = ∇∇Φ_v
+    // Φ_v = -2ν ln ψ ; velocity u = ∇Φ_v ; Hessian H = ∇∇Φ_v.
+    // Derivatives are 4th-order central finite differences: they are local, so
+    // an under-resolved shock (width ν/Δu) does not produce global Gibbs ringing
+    // the way spectral derivatives would.
     let phiv: Vec<f64> = lnpsi.iter().map(|&l| -2.0 * nu_eff * l).collect();
-    let phiv_hat = eng.forward_real(&phiv);
     let mut velocity = vec![0.0f32; grid.size * d];
+    let mut grads: Vec<Vec<f64>> = Vec::new();
     for a in 0..d {
-        let ga = crate::fft::gradient_component(eng, &phiv_hat, a);
+        let ga = fd_derivative(grid, &phiv, a);
         for idx in 0..grid.size {
             velocity[idx * d + a] = ga[idx] as f32;
         }
+        grads.push(ga);
     }
     let mut hess: Vec<Vec<f64>> = vec![Vec::new(); d * d];
     for a in 0..d {
         for b in a..d {
-            let h = hessian_component(eng, &phiv_hat, a, b);
+            let h = if a == b { fd_second_derivative(grid, &phiv, a) } else { fd_derivative(grid, &grads[a], b) };
             hess[a * d + b] = h.clone();
             if a != b {
                 hess[b * d + a] = h;
@@ -232,6 +236,46 @@ pub fn hopf_cole_solve(grid: &Grid, eng: &mut FftEngine, phi: &[f64], nu: f64, d
         nu_eff,
         exponent_range,
     }
+}
+
+/// 4th-order central first derivative along `axis` on the periodic grid.
+pub fn fd_derivative(grid: &Grid, f: &[f64], axis: usize) -> Vec<f64> {
+    let n = grid.n;
+    let d = grid.dim;
+    let stride = n.pow((d - 1 - axis) as u32);
+    let block = stride * n;
+    let h = grid.dx();
+    let mut out = vec![0.0; grid.size];
+    for idx in 0..grid.size {
+        let b = idx / block;
+        let within = idx % block;
+        let i = within / stride;
+        let s0 = within % stride;
+        let at = |j: i64| -> f64 { f[b * block + (j.rem_euclid(n as i64) as usize) * stride + s0] };
+        let i = i as i64;
+        out[idx] = (8.0 * (at(i + 1) - at(i - 1)) - (at(i + 2) - at(i - 2))) / (12.0 * h);
+    }
+    out
+}
+
+/// 4th-order central second derivative along `axis` on the periodic grid.
+pub fn fd_second_derivative(grid: &Grid, f: &[f64], axis: usize) -> Vec<f64> {
+    let n = grid.n;
+    let d = grid.dim;
+    let stride = n.pow((d - 1 - axis) as u32);
+    let block = stride * n;
+    let h2 = grid.dx() * grid.dx();
+    let mut out = vec![0.0; grid.size];
+    for idx in 0..grid.size {
+        let b = idx / block;
+        let within = idx % block;
+        let i = within / stride;
+        let s0 = within % stride;
+        let at = |j: i64| -> f64 { f[b * block + (j.rem_euclid(n as i64) as usize) * stride + s0] };
+        let i = i as i64;
+        out[idx] = (-(at(i + 2) + at(i - 2)) + 16.0 * (at(i + 1) + at(i - 1)) - 30.0 * at(i)) / (12.0 * h2);
+    }
+    out
 }
 
 fn psihat_log_map(psihat: &[C64]) -> Vec<f32> {

@@ -36,7 +36,7 @@ export class Fields3D {
     const wb = el('div', 'hcc-with-bar', root);
     const stage = el('div', 'hcc-stage', wb);
     const cv = el('canvas', 'lab-cv' + (cls ? ' ' + cls : ''), stage);
-    const bar = el('canvas', 'hcc-colorbar', wb);
+    const bar = el('canvas', 'hcc-colorbar', wb); bar.width = 84; bar.height = 8;
     return { cv, bar };
   }
 

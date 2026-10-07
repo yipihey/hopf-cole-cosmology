@@ -302,12 +302,13 @@ function zeldovich1d(el, core) {
   const ctl = controls(el);
   const ic = select(ctl, { label: 'δ₀', options: [{ value: 'wave', label: 'single wave −cos(2πx)' }, { value: 'two', label: 'two waves' }, { value: 'random', label: 'random field (R = 0.03)' }], value: 'wave', onChange: () => { needU = true; update(); } });
   const D = slider(ctl, { label: 'D', min: 0, max: 3, step: 0.005, value: 0.5, onInput: () => update() });
-  const nu = slider(ctl, { label: 'ν', min: 1e-6, max: 1e-2, value: 1e-4, log: true, onInput: () => update() });
+  const nu = slider(ctl, { label: 'ν', min: 1e-6, max: 1e-2, value: 1e-3, log: true, onInput: () => update() });
   const seedBtn = button(ctl, { label: 'new seed', onClick: () => { seed++; needU = true; update(); } });
   const dsc = readout(ctl, { label: 'D_sc' });
+  const shockW = readout(ctl, { label: 'shock width ν/Δu (cells)' });
   const p1 = new LinePlot(panel(el, 'Phase space (x, u): the sheet folds; Burgers forms a shock'), { width: 1060, height: 300 });
   const p2 = new LinePlot(panel(el, 'Eulerian density ρ/ρ̄'), { width: 1060, height: 300 });
-  note(el, 'Points: the Lagrangian sheet q ↦ (q + D u₀(q), u₀(q)), a multi-valued curve after shell crossing. Blue: the adhesion-model velocity at viscosity ν (Hopf–Cole, log-domain kernel). Densities: the multi-stream sheet sum Σ 1/|dx/dq| (points), the adhesion density 1 − D ∂<sub>x</sub>u (blue) and the inviscid Hopf–Lax density dy⋆/dx (grey) whose shocks are δ-functions. In 1D the Zel\'dovich solution is exact up to D<sub>sc</sub>.');
+  note(el, 'Points: the Lagrangian sheet q ↦ (q + D u₀(q), u₀(q)), a multi-valued curve after shell crossing. Blue: the adhesion-model velocity at viscosity ν (Hopf–Cole, log-domain kernel). Densities: the multi-stream sheet sum Σ 1/|dx/dq| (points), the adhesion density 1 − D ∂<sub>x</sub>u (blue) and the inviscid Hopf–Lax density dy⋆/dx (grey) whose shocks are δ-functions. In 1D the Zel\'dovich solution is exact up to D<sub>sc</sub>. A Burgers shock has width ν/Δu: keep it above a grid cell or the density, a derivative of u, becomes noisy.');
   let seed = 3, needU = true, u0 = null;
   const update = scheduler(() => {
     if (needU) {
@@ -320,12 +321,17 @@ function zeldovich1d(el, core) {
       dsc.set(breakingTime(u0, L / N).toFixed(3));
     }
     const dd = D.get(), nn = nu.get();
+    { let lo = Infinity, hi = -Infinity; for (const v of u0) { if (v < lo) lo = v; if (v > hi) hi = v; } shockW.set((nn / (hi - lo) / (L / N)).toFixed(2)); }
     const xpos = new Float64Array(N); for (let i = 0; i < N; i++) xpos[i] = q[i] + dd * u0[i];
     const xw = fmap(xpos, (v) => ((v % L) + L) % L);
     const rhoSheet = core.sheet_density_1d(xpos, L, N);
     const hc = core.hopf_cole_1d(u0, L, nn, dd); const uhc = hc.u(); hc.free();
-    const du = core.derivative_1d(uhc, L);
-    const rhoHC = fmap(du, (v) => Math.max(1 - dd * v, 1e-3));
+    const dxq = L / N;
+    const rhoHC = new Float32Array(N);
+    for (let i = 0; i < N; i++) { // 4th-order central difference (local, no Gibbs ringing at shocks)
+      const du = (8 * (uhc[(i + 1) % N] - uhc[(i + N - 1) % N]) - (uhc[(i + 2) % N] - uhc[(i + N - 2) % N])) / (12 * dxq);
+      rhoHC[i] = Math.max(1 - dd * du, 1e-3);
+    }
     let rhoHL = null, uHL = null;
     if (dd > 0) { const inv = core.inviscid_1d(u0, L, dd); rhoHL = inv.rho(); uHL = inv.u(); inv.free(); }
     const series = [{ x: xw, y: u0, label: 'sheet (Lagrangian points)', color: C[1], line: false, points: true, radius: 1.3, opacity: 0.7 },

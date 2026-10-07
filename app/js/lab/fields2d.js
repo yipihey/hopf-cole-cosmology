@@ -52,7 +52,7 @@ class Slot {
     this.cvF = el('canvas', 'lab-cv', stage);
     this.cvS = el('canvas', 'lab-cv', stage);
     this.cvS.hidden = true;
-    this.bar = el('canvas', 'hcc-colorbar', wb);
+    this.bar = el('canvas', 'hcc-colorbar', wb); this.bar.width = 84; this.bar.height = 8;
     this.hover = el('div', 'lab-hover hcc-note', root, ' ');
     this.cap = el('p', 'hcc-note lab-cap', root);
     this.note = el('p', 'lab-warn-note', root); this.note.hidden = true;
@@ -76,7 +76,6 @@ class Slot {
         this.save({ sub: v }); this.app.runPanel(this.owner, this.idx);
       } });
     }
-    this.cmapSel.el.hidden = def.gpu && false;
   }
 
   markStale(b) { this.root.classList.toggle('is-stale', b); }
@@ -166,7 +165,7 @@ class Slot {
   drawSheetParams(mode, cmap, log) {
     const S = this.app.S;
     const lo = log ? S.rmin : 0, hi = log ? S.rmax : LIN_MAX;
-    this.sv.draw({ mode, cmap, vmin: lo, vmax: hi, log, wireAlpha: 0.3 });
+    this.sv.draw({ mode, cmap, vmin: lo, vmax: hi, log, wireAlpha: Math.min(0.35, 25 / this.app.eng.n) });
     renderColorbar(this.bar, cmap, lo, hi, { label: 'ρ/ρ̄', log });
   }
 

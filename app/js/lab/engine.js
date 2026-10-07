@@ -209,9 +209,12 @@ export class Engine {
       const dw = this.delta(which, P), dl = this.linear(P);
       const c = unpackSpectrum(this.sim.cross_spectrum(dw, dl, this.nbins));
       const pw = this.pk(which, P, false), pl = this.pk('lin', P, false);
-      const r = new Float64Array(c.k.length);
-      for (let i = 0; i < r.length; i++) r[i] = c.p[i] / Math.sqrt(Math.max(1e-300, pw.p[i] * pl.p[i]));
-      return { k: c.k, r };
+      const r = new Float64Array(c.k.length), g = new Float64Array(c.k.length);
+      for (let i = 0; i < r.length; i++) {
+        r[i] = c.p[i] / Math.sqrt(Math.max(1e-300, pw.p[i] * pl.p[i]));
+        g[i] = c.p[i] / Math.max(1e-300, pl.p[i]);      // propagator G = P_{f,lin} / P_lin
+      }
+      return { k: c.k, r, g };
     }));
   }
   /** Smooth linear theory D^2 P0(k) on a fine k grid. */
