@@ -110,3 +110,9 @@ html { color-scheme: light dark; }
 .lab-note-line.lab-bad { color: var(--lab-bad); }
 
 .lab-working, .lab-working * { cursor: progress; }
+
+/* nu presets and cosmology readouts */
+.lab-nupresets { gap: 0.3rem; align-items: center; flex-wrap: wrap; margin: 0.1rem 0; }
+.lab-nupresets .hcc-label { flex: 0 0 auto; font-size: 0.8125rem; }
+.lab-nupresets .hcc-btn { padding: 0.05rem 0.45rem; font-size: 0.78rem; }
+.lab-gbody .lab-dsc b { font-variant-numeric: tabular-nums; }

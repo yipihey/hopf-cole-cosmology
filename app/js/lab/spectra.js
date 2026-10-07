@@ -66,8 +66,10 @@ export class Spectra {
 
   syncMode() {
     const d3 = this.app.S.mode === 3;
-    this.checks.sheet.el.querySelector('.hcc-label').textContent = d3 ? 'CIC (measured, deconv.)' : 'sheet (measured)';
-    this.checks.cic.el.hidden = d3;
+    this.checks.sheet.el.querySelector('.hcc-label').textContent = d3 ? 'sheet (tetrahedra, CPU)' : 'sheet (measured)';
+    this.checks.cic.el.querySelector('.hcc-label').textContent = d3 ? 'CIC (measured, deconv.)' : 'CIC (deconv.)';
+    const ser = this.app.S.ser;
+    for (const id of Object.keys(this.checks)) this.checks[id].set(ser.includes(id));
   }
 
   markStale(b) { this.pPanel.classList.toggle('is-stale', b); this.rPanel.classList.toggle('is-stale', b); }
@@ -84,10 +86,11 @@ export class Spectra {
     const prim = dim === 2 ? 'sheet' : 'cic';
     const t = [];
     t.push({ label: 'P(k) linear', fn: () => { e.pk('lin', P); e.plinFine(P); } });
-    if (w.has('sheet')) t.push({ label: `P(k) ${prim}`, fn: () => e.pk(prim, P, prim === 'cic') });
-    if (w.has('cic') && dim === 2) t.push({ label: 'P(k) CIC', fn: () => e.pk('cic', P, true) });
-    if (w.has('hc')) t.push({ label: 'P(k) Hopf–Cole', fn: () => e.pk('hc', P) });
-    t.push({ label: 'r(k)', fn: () => { e.rk(prim, P); e.rk('hc', P); e.sigmaV2(); } });
+    // 3D GPU path: `need` runs the GPU FFT once per field and seeds P(k), r(k) and the Fourier maps
+    if (w.has('sheet')) t.push({ label: dim === 3 ? 'P(k) sheet (tetrahedra)' : 'P(k) sheet', fn: async () => { await e.need('analysis', 'sheet', P); e.pk('sheet', P, false); } });
+    if (w.has('cic')) t.push({ label: 'P(k) CIC', fn: async () => { await e.need('analysis', 'cic', P); e.pk('cic', P, true); } });
+    if (w.has('hc')) t.push({ label: 'P(k) Hopf–Cole', fn: async () => { await e.need('analysis', 'hc', P); e.pk('hc', P); } });
+    t.push({ label: 'r(k)', fn: async () => { await e.need('analysis', prim, P); await e.need('analysis', 'hc', P); e.rk(prim, P); e.rk('hc', P); e.sigmaV2(); } });
     if (gaussian && (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13'))) {
       t.push({ label: 'SPT 1-loop', heavy: true, fn: () => e.loop(P, 0) });
     }
@@ -108,12 +111,16 @@ export class Spectra {
 
     const lin = e.plinFine(P);
     if (w.has('lin')) series.push({ x: lin.k, y: lin.p, label: 'linear theory D²P₀', color: '#8a8f98', width: 2.2 });
-    let pPrim = null;
     if (w.has('sheet')) {
-      const s = e.pk(prim, P, prim === 'cic'); pPrim = s;
-      series.push({ x: s.k, y: s.p, label: primLabel, color: PALETTE[0], points: true, width: 3, opacity: 0.6, radius: 3 });
+      const s = e.pk('sheet', P, false);
+      series.push(dim === 2 ? { x: s.k, y: s.p, label: 'sheet', color: PALETTE[0], points: true, width: 3, opacity: 0.6, radius: 3 }
+        : { x: s.k, y: s.p, label: 'sheet (tetrahedra)', color: PALETTE[5], points: true, width: 1, radius: 2 });
     }
-    if (w.has('cic') && dim === 2) { const s = e.pk('cic', P, true); series.push({ x: s.k, y: s.p, label: 'CIC (deconv.)', color: PALETTE[5], points: true, width: 1, radius: 2 }); }
+    if (w.has('cic')) {
+      const s = e.pk('cic', P, true);
+      series.push(dim === 2 ? { x: s.k, y: s.p, label: 'CIC (deconv.)', color: PALETTE[5], points: true, width: 1, radius: 2 }
+        : { x: s.k, y: s.p, label: primLabel, color: PALETTE[0], points: true, width: 3, opacity: 0.6, radius: 3 });
+    }
     if (w.has('hc')) { const s = e.pk('hc', P); series.push({ x: s.k, y: s.p, label: 'Hopf–Cole', color: PALETTE[1], points: true, width: 1.2, radius: 2 }); }
 
     let cs2 = null, fitNote = '';
@@ -124,7 +131,7 @@ export class Spectra {
       if (w.has('p22')) series.push({ x: spt.k, y: spt.p22, label: 'P22', color: PALETTE[2], width: 1.2, dash: '5 3' });
       if (w.has('p13')) series.push({ x: spt.k, y: Float64Array.from(spt.p13, Math.abs), label: '|P13|', color: PALETTE[3], width: 1.2, dash: '5 3' });
       if (w.has('eft')) {
-        const meas = pPrim || e.pk(prim, P, prim === 'cic');
+        const meas = e.pk(prim, P, prim === 'cic');
         const m = Math.min(spt.k.length, meas.k.length);
         const km = S.km;
         const fit = fitCounterterm(spt.k.subarray(0, m), meas.p.subarray(0, m), tot.subarray(0, m), spt.plin.subarray(0, m), km);

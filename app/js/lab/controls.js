@@ -2,7 +2,7 @@
 
 import { slider, checkbox, button } from '../viz/ui.js';
 import { el, sel, numIn, fmtNum } from './dom.js';
-import { GRID_2D, GRID_3D } from './state.js';
+import { GRID_2D, GRID_3D, OMEGA_M } from './state.js';
 
 const gridOptions = (mode) => (mode === 3 ? GRID_3D : GRID_2D).map((n) => [n, mode === 3 ? `${n}³` : `${n}²`]);
 const methodOptions = (mode) => (mode === 3
@@ -32,6 +32,9 @@ export function buildControls(app, host) {
     return r;
   });
   C.n = sel(gm, { label: 'grid N', options: gridOptions(S.mode), value: S.n, onChange: (v) => app.setParam('n', Number(v), 'ic') });
+  C.gc = checkbox(gm, { label: 'GPU compute', value: S.gc && app.gpuCompute, onChange: (v) => app.setGpuCompute(v) });
+  C.gc.el.title = 'WebGPU compute path for the 3D mode: LPT positions, CIC deposit, Hopf–Cole log-sum-exp, FFT spectra and Fourier maps on the GPU (single precision). Off: WASM (double precision, seconds at 128³).';
+  C.gcNote = el('p', 'lab-note-line', gm, 'GPU path: f32 arithmetic; CIC uses 18-bit fixed-point atomics (a cell overflows at ρ/ρ̄ ≥ 16384). LPT terms are uploaded once per build, so the D slider only recomputes the fields.');
   C.memWarn = el('p', 'lab-warn', gm, '128³ with 4LPT needs about 1 GB of memory and 30–60 s per run. Lower orders are cheaper.');
 
   // ---------------------------------------------------------------- initial conditions
@@ -78,10 +81,22 @@ export function buildControls(app, host) {
   C.D = slider(gd, { label: 'growth D', min: 0, max: 2, step: 0.005, value: S.D, onInput: set('D', 'dyn'), format: (v) => v.toFixed(3) });
   const dscRow = el('div', 'lab-dsc', gd);
   C.dsc = el('span', null, dscRow, 'D_sc: –');
+  C.om = sel(gd, { label: 'Ω_m', options: OMEGA_M.map((o) => [o, o === 1 ? '1 (EdS)' : String(o)]), value: S.om,
+    title: 'Flat ΛCDM matter density. 1 = Einstein–de Sitter (exact Dⁿ growth); otherwise the LPT growth functions are integrated numerically. Changing it rebuilds the LPT (the IC is kept).',
+    onChange: (v) => app.setParam('om', Number(v), 'all') });
+  C.cosmo = el('div', 'lab-dsc', gd, 'a(D) = –');
   C.order = sel(gd, { label: 'LPT order', options: [[1, '1 (Zel’dovich)'], [2, '2 (2LPT)'], [3, '3 (3LPT)'], [4, '4 (4LPT)']], value: S.order, onChange: (v) => app.setParam('order', Number(v), 'all') });
-  C.nu = slider(gd, { label: 'ν [L²]', min: 1e-6, max: 1e-2, value: S.nu, log: true, onInput: set('nu', 'all'), format: (v) => v.toExponential(1) });
-  C.me = sel(gd, { label: 'HC method', options: methodOptions(S.mode), value: S.me, onChange: (v) => { app.setParam('me', Number(v), 'all'); C.syncVisibility(); } });
-  C.mx = slider(gd, { label: 'max_exp', min: 10, max: 60, step: 1, value: S.mx, onInput: set('mx', 'all'), format: (v) => v.toFixed(0) });
+  C.growth = el('p', 'lab-note-line', gd, 'LPT growth g_τ(D)/Dⁿ: –');
+  C.nu = slider(gd, { label: 'ν [L²]', min: 1e-6, max: 1e-2, value: S.nu, log: true, onInput: set('nu', 'nu'), format: (v) => v.toExponential(1) });
+  const presets = el('div', 'hcc-row lab-nupresets', gd);
+  el('span', 'hcc-label', presets, 'ν presets');
+  for (const v of [1e-5, 1e-4, 1e-3, 1e-2]) {
+    button(presets, { label: v.toExponential(0), onClick: () => { C.nu.set(v); app.setParam('nu', v, 'nu'); } });
+  }
+  C.nuInfo = el('p', 'lab-note-line', gd, 'shock width ν/(Δu·Δx): –');
+  el('p', 'lab-note-line', gd, 'Shocks of width ν/Δu below one cell make the density (a derivative of u) noisy; below the grid floor the log-domain kernel degenerates into the discrete Hopf–Lax minimum.');
+  C.me = sel(gd, { label: 'HC method', options: methodOptions(S.mode), value: S.me, onChange: (v) => { app.setParam('me', Number(v), 'nu'); C.syncVisibility(); } });
+  C.mx = slider(gd, { label: 'max_exp', min: 10, max: 60, step: 1, value: S.mx, onInput: set('mx', 'nu'), format: (v) => v.toFixed(0) });
   C.hcNote = el('p', 'lab-note-line', gd);
   C.hcNote.hidden = true;
   const runRow = el('div', 'hcc-row lab-runrow', gd);
@@ -103,6 +118,8 @@ export function buildControls(app, host) {
     C.mx.el.hidden = S.me !== 0;
     C.wave.forEach((w) => { w.comps[2].show(S.mode === 3); });
     C.memWarn.hidden = !(S.mode === 3 && S.n >= 128);
+    C.gc.el.hidden = !(S.mode === 3 && app.gpuCompute);
+    C.gcNote.hidden = C.gc.el.hidden || !S.gc;
   };
 
   /** Reflect state S into all widgets (after a mode switch or hash restore). */
@@ -119,8 +136,9 @@ export function buildControls(app, host) {
       w.comps.forEach((c, j) => c.set(S[key][j]));
       w.amp.set(S['a' + (i + 1)]); w.ph.set(((S['f' + (i + 1)] % 360) + 360) % 360);
     });
-    C.D.set(S.D); C.order.set(S.order); C.nu.set(S.nu); C.me.set(S.me); C.mx.set(S.mx);
+    C.D.set(S.D); C.om.set(S.om); C.order.set(S.order); C.nu.set(S.nu); C.me.set(S.me); C.mx.set(S.mx);
     C.live.set(S.live);
+    C.gc.set(S.gc && app.gpuCompute);
     C.syncVisibility();
   };
 
@@ -136,6 +154,28 @@ export function buildControls(app, host) {
     C.hcNote.textContent = raised
       ? `ν_eff = ${fmtNum(hc.nuEff, 3)} (raised from ν: exponent range ${fmtNum(hc.range, 3)} exceeds max_exp)`
       : `ν_eff = ${fmtNum(hc.nuEff, 3)}, exponent range ${fmtNum(hc.range, 3)}`;
+  };
+  /** Cosmology readouts: a(D), Omega_m(a), D_max and the LPT growth ratios. */
+  C.setCosmo = (cos, dmax, growth) => {
+    if (!cos) { C.cosmo.textContent = 'a(D) = –'; C.growth.textContent = 'LPT growth g_τ(D)/Dⁿ: –'; return; }
+    C.cosmo.innerHTML = `a(D) = <b>${fmtNum(cos.a, 4)}</b> &nbsp; Ω<sub>m</sub>(a) = <b>${fmtNum(cos.om, 3)}</b>` + (Number.isFinite(dmax) ? ` &nbsp; D<sub>max</sub> = ${fmtNum(dmax, 3)}` : ' &nbsp; (EdS: a = D; the constants −3/7, … are absorbed in the EdS term fields, so g/Dⁿ = 1)');
+    C.growth.title = growth.map((q) => `${q.label}: ${q.full}`).join('\n');
+    C.growth.textContent = 'LPT growth g_τ(D)/Dⁿ: ' + (growth.length ? growth.map((q) => `τ=${q.label}: ${fmtNum(q.g, 4)}`).join(' · ') : '–');
+  };
+  /** Restrict the D slider to 0.999 D_max in ΛCDM (2 in EdS). */
+  C.setDMax = (dmax) => {
+    const eff = Number.isFinite(dmax) ? Math.min(2, 0.999 * dmax) : 2;
+    const input = C.D.el.querySelector('input');
+    if (Number(input.max) !== eff) { input.max = eff; if (S.D > eff) S.D = eff; C.D.set(S.D); }
+    return eff;
+  };
+  /** Shock width estimate (cells) and grid floor under the nu slider. */
+  C.setNuInfo = (width, floor, nu, method) => {
+    const w = Number.isFinite(width) ? fmtNum(width, 2) + ' cells' : '–';
+    const fl = method === 0 ? 'none (Fourier multiplier)' : (Number.isFinite(floor) ? fmtNum(floor, 2) : '–');
+    const below = Number.isFinite(floor) && method !== 0 && nu < floor;
+    C.nuInfo.className = 'lab-note-line' + ((Number.isFinite(width) && width < 1) || below ? ' lab-bad' : '');
+    C.nuInfo.textContent = `shock width ν/(Δu·Δx) = ${w} · grid floor ν_min = ${fl}${below ? ' (ν below floor)' : ''}`;
   };
   C.setDirty = (b) => {
     C.run.el.classList.toggle('lab-pending', b);

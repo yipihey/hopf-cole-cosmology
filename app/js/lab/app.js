@@ -8,7 +8,7 @@
 
 import { getGPU } from '../viz/gpu.js';
 import { Engine } from './engine.js';
-import { decodeHash, encodeHash, defaultN, defaultLive } from './state.js';
+import { decodeHash, encodeHash, defaultN, defaultLive, ENV } from './state.js';
 import { buildControls } from './controls.js';
 import { Fields2D } from './fields2d.js';
 import { Fields3D } from './fields3d.js';
@@ -36,6 +36,11 @@ export class Lab {
     const gpu = await getGPU();
     this.gpu = !!gpu;
     this.backend = this.gpu ? 'webgpu' : 'canvas2d';
+    // WebGPU compute path (3D): needs the shared device; default 'live update' depends on it
+    this.gpuCompute = !!gpu;
+    ENV.gpuCompute = this.gpuCompute;
+    this.eng.gpuDev = gpu ? gpu.device : null;
+    if (!new URLSearchParams(location.hash.replace(/^#/, '')).has('lv')) { this.S.live = defaultLive(this.S.mode, this.S.gc); this.P.live = this.S.live; }
     if (new URLSearchParams(location.search).has('embed')) document.body.classList.add('embed');
     this.statusEl = $('lab-status-text');
     this.timingEl = $('lab-status-timing');
@@ -83,7 +88,16 @@ export class Lab {
       else this.setDirty(false);
       return;
     }
+    if (level === 'nu') {
+      // fast nu path: only the Hopf-Cole dependent results are recomputed (everything else is cached)
+      if (!S.live) { this.invalidate(); this.setDirty(true); this.markStaleHc(true); return; }
+      this.markStaleHc(true);
+      this.setStatus('ν changing …', 'busy');
+      this.scheduleHc();
+      return;
+    }
     this.invalidate();
+    this.appliedKey = null;
     if (key === 'D') this.P.D = this.S.D;   // fast path works on the applied snapshot
     if (!S.live) {
       this.setDirty(true);
@@ -100,10 +114,31 @@ export class Lab {
     }
   }
 
+  /** The "GPU compute" checkbox (3D). Live update follows its default; the other path recomputes. */
+  setGpuCompute(v) {
+    const S = this.S;
+    S.gc = v;
+    S.live = defaultLive(S.mode, v);
+    this.hashChanged();
+    this.controls.syncAll();
+    this.invalidate();
+    this.markStale(true);
+    if (S.mode === 3 && this.eng.sim) {
+      if (S.live) this.schedule(30); else { this.setDirty(true); this.setStatus('GPU compute off: press Run (the WASM path takes seconds at 128³).'); }
+    }
+  }
+  /** True when the GPU compute path is requested and possible for the current state. */
+  gpuComputeOn(S = this.S) { return this.gpuCompute && S.mode === 3 && !!S.gc; }
+
   setMode(m) {
     if (m === this.S.mode) return;
     const S = this.S;
-    S.mode = m; S.n = defaultN(m); S.live = defaultLive(m);
+    this.eng.releaseGpu();
+    S.mode = m; S.n = defaultN(m); S.live = defaultLive(m, S.gc);
+    this.appliedKey = null;
+    // 3D: 'sheet' is the tetrahedral sheet; the measured CIC spectrum is the default there
+    if (m === 3 && S.ser.includes('sheet') && !S.ser.includes('cic')) S.ser = S.ser.map((q) => (q === 'sheet' ? 'cic' : q));
+    else if (m === 2 && S.ser.join() === 'lin,cic,hc,spt') S.ser = ['lin', 'sheet', 'hc', 'spt'];
     if (m === 3 && S.me > 1) S.me = 1;
     this.invalidate();
     this.controls.syncAll();
@@ -132,6 +167,47 @@ export class Lab {
   markStale(b, keepFast = false) {
     if (this.fields) this.fields.markStale(b, keepFast);
     if (this.spectra) this.spectra.markStale(b);
+  }
+
+  markStaleHc(b) {
+    if (this.fields && this.fields.markStaleHc) this.fields.markStaleHc(b);
+    if (this.spectra) this.spectra.markStale(b);
+  }
+
+  /** Key of everything the non-Hopf-Cole results depend on (a nu change leaves it unchanged). */
+  coreKey(S) { return [Engine.icSignature(S), S.D, S.order, S.om, S.gc, S.mode, S.n].join('|'); }
+
+  scheduleHc() {
+    clearTimeout(this.timers.hc);
+    this.timers.hc = setTimeout(() => this.runHc(), this.S.mode === 3 ? 40 : 80);
+  }
+
+  /**
+   * Fast nu path: recompute only the Hopf-Cole dependent panels and spectra. The memo cache is keyed
+   * (IC, D, order) for LPT / sheet / CIC results and (IC, D, nu, method) for Hopf-Cole results, so nothing
+   * else is touched. Falls back to a full run when something else changed since the last full run.
+   */
+  async runHc() {
+    clearTimeout(this.timers.hc);
+    const S = this.S, e = this.eng;
+    if (!e.sim || this.appliedKey === null || this.appliedKey !== this.coreKey(S)) { this.run(); return; }
+    const gen = ++this.runGen;
+    this.P = structuredClone(S);
+    const P = this.P;
+    this.setDirty(false);
+    this.lastError = null;
+    const t0 = performance.now();
+    e.timings.clear();
+    const tasks = [];
+    if (this.visible('f')) tasks.push(...this.fields.tasks(P, true).map((t) => ({ ...t, heavy: false })));
+    if (this.visible('s')) tasks.push(...this.spectra.tasks(P).map((t) => ({ ...t, heavy: false })));
+    tasks.push({ label: 'readouts', fn: () => this.refreshReadouts() });
+    const ok = await this.runTasks(tasks, gen);
+    if (gen !== this.runGen) return;
+    this.refreshReadouts();
+    if (this.lastError) this.setStatus(this.lastError, 'err');
+    else if (ok) this.setStatus(`ready · ν = ${P.nu.toExponential(1)} · Hopf–Cole only · ${P.mode}D ${P.n}${P.mode === 2 ? '²' : '³'} · D = ${P.D.toFixed(3)}${e.pathLabel(P) ? ' · ' + e.pathLabel(P) : ''} · ${fmtMs(performance.now() - t0)}`);
+    this.showTimings();
   }
 
   // ---------------------------------------------------------------- sections
@@ -207,20 +283,29 @@ export class Lab {
     const heavy3 = P.mode === 3;
 
     const tasks = [];
-    tasks.push({ label: 'initial conditions', heavy: icChanged, critical: true, fn: () => { this.eng.configure(P); } });
-    tasks.push({ label: `LPT order ${P.order}`, heavy: true, critical: true, fn: () => { this.eng.ensureLpt(P.order); } });
+    clearTimeout(this.timers.hc);
+    this.appliedKey = null;
+    this.eng.setGpuPath(this.gpuComputeOn(P));
+    tasks.push({ label: 'initial conditions', heavy: icChanged, critical: true, fn: () => { this.eng.configure(P); this.eng.applyCosmology(P.om); } });
+    tasks.push({ label: `LPT order ${P.order}`, heavy: icChanged || this.eng.builtOrder < P.order || P.om !== this.eng.om, critical: true,
+      fn: () => { this.eng.ensureLpt(P.order); this.limitD(P); } });
+    if (heavy3) tasks.push({ label: 'GPU upload', heavy: this.gpuComputeOn(P) && (icChanged || !this.eng.g || !this.eng.gTerms || this.eng.gTerms.order < P.order), fn: () => this.eng.prepareGpu(P) });
     if (this.visible('f')) {
       const ft = this.fields.tasks(P);
       tasks.push(...ft.filter((t) => !t.heavy), ...ft.filter((t) => t.heavy));
     }
     if (this.visible('s')) tasks.push(...this.spectra.tasks(P));
-    tasks.push({ label: 'shell-crossing times', heavy: heavy3, fn: () => { this.eng.dsc(P.order); this.eng.dsc(1); this.refreshReadouts(); } });
+    tasks.push({ label: 'shell-crossing times', heavy: heavy3 && this.eng.peek(['dsc', P.order]) === undefined, fn: () => { this.eng.dsc(P.order); this.eng.dsc(1); this.refreshReadouts(); } });
 
     const ok = await this.runTasks(tasks, gen);
     if (gen !== this.runGen) return;
     this.refreshReadouts();
+    if (ok && !this.lastError) this.appliedKey = this.coreKey(P);
     if (this.lastError) this.setStatus(this.lastError, 'err');
-    else if (ok) this.setStatus(`ready · ${P.mode}D ${P.n}${P.mode === 2 ? '²' : '³'} · order ${P.order} · D = ${P.D.toFixed(3)} · ${fmtMs(performance.now() - t0)}`);
+    else if (ok) {
+      const path = this.eng.pathLabel(P);
+      this.setStatus(`ready · ${P.mode}D ${P.n}${P.mode === 2 ? '²' : '³'} · order ${P.order} · D = ${P.D.toFixed(3)}${path ? ' · ' + path : ''} · ${fmtMs(performance.now() - t0)}`, this.eng.gpuError && P.mode === 3 ? 'err' : '');
+    }
     this.showTimings();
   }
 
@@ -267,9 +352,21 @@ export class Lab {
     this.setStatus('D changing …', 'busy');
   }
 
+  /** In flat LCDM the D slider ends at 0.999 D_max; clamp the applied and the displayed D. */
+  limitD(P) {
+    const eff = this.controls.setDMax(this.eng.dMax());
+    if (P.D > eff) { P.D = eff; this.S.D = eff; this.controls.D.set(eff); this.hashChanged(); }
+  }
+
   refreshReadouts() {
     const e = this.eng;
     if (!e.sim || !this.controls) return;
+    this.controls.setCosmo(e.builtOrder > 0 ? e.cosmoAt(this.P.D) : null, e.dMax(), e.termGrowth(this.P.D, this.P.order));
+    {
+      const hc = e.hcCached(this.P), du = e.velocityJump();
+      const nu = hc ? hc.nuEff : this.P.nu;
+      this.controls.setNuInfo(nu / (du * (1 / e.n)), hc ? hc.floor : NaN, nu, this.P.me);
+    }
     const g = (o) => { const v = e.peek(['dsc', o]); return v === undefined ? NaN : v; };
     const dsc = g(this.P.order), dsc1 = g(1);
     this.controls.setDsc(dsc, dsc1, this.P.D);

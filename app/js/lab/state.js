@@ -7,13 +7,17 @@
 export const GRID_2D = [128, 256, 512];
 export const GRID_3D = [32, 48, 64, 96, 128];
 export const METHODS = [0, 1, 2, 4];
+export const OMEGA_M = [1, 0.3, 0.25, 0.4];     // 1 = Einstein-de Sitter (exact D^n growth)
 
 export const SLOT_KINDS = [
   'sheetgpu', 'sheetcpu', 'cic', 'hc', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed',
 ];
 
 export function defaultN(mode) { return mode === 3 ? 64 : 256; }
-export function defaultLive(mode) { return mode !== 3; }
+/** Runtime environment, set once by the app after the WebGPU probe. */
+export const ENV = { gpuCompute: false };
+/** Live update is on by default in 2D, and in 3D when the GPU compute path is active (it recomputes in ~0.1-0.3 s). */
+export function defaultLive(mode, gc = true) { return mode !== 3 || (ENV.gpuCompute && gc); }
 
 export function makeDefaults(mode = 2) {
   return {
@@ -27,6 +31,8 @@ export function makeDefaults(mode = 2) {
     pa: 2, pw: 0.08,
     // dynamics
     D: 0.3, order: 2, nu: 1e-4, me: 1, mx: 30, live: defaultLive(mode),
+    gc: true,               // 3D: WebGPU compute path (when available)
+    om: 1,                  // flat LCDM matter density (1 = EdS)
     // layout
     vis: 'fs',              // visible sections: f = fields, s = spectra, e = explain
     // 2D field panels: [kind, sub, cmap, log]  ('' = default)
@@ -36,7 +42,7 @@ export function makeDefaults(mode = 2) {
     v1: 'cic', vm: 'emission', vo: 10, s1: 'hc', sa: 2, si: 0.5, fo: 'cic',
     c1: 'inferno', c2: 'magma', c3: 'viridis', c4: 'twilight', l1: true, l2: true,
     // spectra
-    ser: ['lin', 'sheet', 'hc', 'spt'], km: 30,
+    ser: mode === 3 ? ['lin', 'cic', 'hc', 'spt'] : ['lin', 'sheet', 'hc', 'spt'], km: 30,
   };
 }
 
@@ -71,18 +77,20 @@ const SCHEMA = [
   ['me', 'me', 'enum', METHODS],
   ['mx', 'mx', 'num', [1, 200]],
   ['live', 'lv', 'bool'],
+  ['gc', 'gc', 'bool'],
+  ['om', 'om', 'omega'],
   ['vis', 'v', 'str'],
   ['slots', 'f', 'slots'],
   ['same', 'sr', 'bool'],
   ['rmin', 'r0', 'num', [1e-3, 1]],
   ['rmax', 'r1', 'num', [1, 1e4]],
-  ['v1', 'v1', 'str', ['cic', 'hc', 'lin']],
+  ['v1', 'v1', 'str', ['cic', 'sheet', 'hc', 'lin']],
   ['vm', 'vm', 'str', ['mip', 'emission']],
   ['vo', 'vo', 'num', [0.1, 1000]],
-  ['s1', 's1', 'str', ['cic', 'hc', 'lin']],
+  ['s1', 's1', 'str', ['cic', 'sheet', 'hc', 'lin']],
   ['sa', 'sa', 'int', [0, 2]],
   ['si', 'si', 'num', [0, 1]],
-  ['fo', 'fo', 'str', ['cic', 'hc', 'lin']],
+  ['fo', 'fo', 'str', ['cic', 'sheet', 'hc', 'lin']],
   ['c1', 'c1', 'str'], ['c2', 'c2', 'str'], ['c3', 'c3', 'str'], ['c4', 'c4', 'str'],
   ['l1', 'l1', 'bool'], ['l2', 'l2', 'bool'],
   ['ser', 'se', 'list'],
@@ -96,11 +104,13 @@ export function encodeHash(S) {
   const D = makeDefaults(S.mode);
   const p = [];
   for (const [key, hk, type] of SCHEMA) {
+    if (key === 'mode' && S.mode === 3) { p.push('m=3'); continue; }      // 2D is the default mode
     if (same(S[key], D[key])) continue;
     const v = S[key];
     let s;
     switch (type) {
       case 'bool': s = bool(v); break;
+      case 'omega': s = num(v); break;
       case 'num': s = num(v); break;
       case 'ivec': s = v.join('_'); break;
       case 'slots': s = v.map((q) => q.join('.').replace(/\.+$/, '')).join('_'); break;
@@ -128,6 +138,7 @@ export function decodeHash(hash) {
         case 'int': { const v = Math.round(Number(raw)); if (Number.isFinite(v)) S[key] = clamp(v, extra[0], extra[1]); break; }
         case 'num': { const v = Number(raw); if (Number.isFinite(v)) S[key] = clamp(v, extra[0], extra[1]); break; }
         case 'bool': S[key] = raw === '1' || raw === 'true'; break;
+        case 'omega': { const v = Number(raw); const m = OMEGA_M.find((o) => Math.abs(o - v) < 1e-9); if (m !== undefined) S[key] = m; break; }
         case 'str': if (!extra || extra.includes(raw)) S[key] = raw; break;
         case 'ivec': {
           const v = raw.split('_').map((x) => Math.round(Number(x)));
@@ -151,6 +162,6 @@ export function decodeHash(hash) {
   const grids = S.mode === 3 ? GRID_3D : GRID_2D;
   if (!grids.includes(S.n)) S.n = defaultN(S.mode);
   if (S.mode === 3 && S.me > 1) S.me = 1;
-  if (!q.has('lv')) S.live = defaultLive(S.mode);
+  if (!q.has('lv')) S.live = defaultLive(S.mode, S.gc);
   return S;
 }

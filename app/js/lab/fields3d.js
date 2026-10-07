@@ -8,8 +8,8 @@ import { slice3D } from '../hcc.js';
 import { el, sel } from './dom.js';
 
 const CMAPS = Object.keys(COLORMAPS).map((c) => [c, c]);
-const FIELDS = [['cic', 'CIC density'], ['hc', 'Hopf–Cole density'], ['lin', 'Linear density 1+Dδ0']];
-const FNAME = { cic: 'CIC density', hc: 'Hopf–Cole density 1+δ', lin: 'linear density 1+Dδ0 (clipped at 10⁻³)' };
+const FIELDS = [['cic', 'CIC density'], ['sheet', 'Sheet density (tetrahedra, CPU)'], ['hc', 'Hopf–Cole density'], ['lin', 'Linear density 1+Dδ0']];
+const FNAME = { cic: 'CIC density', sheet: 'tetrahedral sheet density (Kuhn simplices, point-sampled, CPU)', hc: 'Hopf–Cole density 1+δ', lin: 'linear density 1+Dδ0 (clipped at 10⁻³)' };
 
 export class Fields3D {
   constructor(app, host) {
@@ -97,13 +97,29 @@ export class Fields3D {
   fastUpdate() { return false; }
   redrawAll() { [0, 1, 2, 3].forEach((i) => this.app.runPanel(this, i)); }
 
-  tasks(P) {
-    return [
-      { label: 'volume', heavy: true, fn: () => this.updateVolume(P) },
-      { label: 'slice', heavy: false, fn: () => this.updateSlice(P) },
-      { label: 'Fourier amplitude', heavy: true, fn: () => this.updateFourier(2, P) },
-      { label: 'Fourier phase', heavy: false, fn: () => this.updateFourier(3, P) },
+  /** Panels whose content comes from the Hopf-Cole solution (for the fast nu path). */
+  dependsOnHc() { const S = this.app.S; return { vol: S.v1 === 'hc', slice: S.s1 === 'hc', fourier: S.fo === 'hc' }; }
+
+  tasks(P, hcOnly = false) {
+    // With the GPU path warm every panel is cheap (tens of ms): no per-task repaint waits, volume first.
+    const S = this.app.S, e = this.app.eng, warm = e.gpuActive(P) && !!e.g && !!e.ref;
+    const dep = this.dependsOnHc();
+    const t = [
+      { label: 'volume', heavy: !warm || S.v1 === 'sheet', fn: () => this.updateVolume(P), hc: dep.vol },
+      { label: 'slice', heavy: S.s1 === 'sheet', fn: () => this.updateSlice(P), hc: dep.slice },
+      { label: 'Fourier amplitude', heavy: !warm || S.fo === 'sheet', fn: () => this.updateFourier(2, P), hc: dep.fourier },
+      { label: 'Fourier phase', heavy: false, fn: () => this.updateFourier(3, P), hc: dep.fourier },
     ];
+    return hcOnly ? t.filter((q) => q.hc) : t;
+  }
+
+  /** Mark only the Hopf-Cole panels stale (nu changed). */
+  markStaleHc(b) {
+    const d = this.dependsOnHc();
+    this.pv.root.classList.toggle('is-stale', b && d.vol);
+    this.ps.root.classList.toggle('is-stale', b && d.slice);
+    this.pf2.root.classList.toggle('is-stale', b && d.fourier);
+    this.pf3.root.classList.toggle('is-stale', b && d.fourier);
   }
 
   /** Used by app.runPanel for single-panel refreshes. */
@@ -120,10 +136,14 @@ export class Fields3D {
     if (!eng.sim) return;
     if (!this.vv) { this.vv = new VolumeView(this.cvV, { cmap: S.c1 }); this.vvInit = this.vv.init(); }
     await this.vvInit;
+    await eng.need('field', S.v1, P);
     const rho = eng.rho(S.v1, P);
     this.vv.setVolume(rho, eng.n);
     this.vv.setRange(undefined, undefined, { log: S.l1 });
-    this.capV.textContent = `${FNAME[S.v1]}: ${S.vm === 'mip' ? 'maximum-intensity projection' : 'emission-absorption ray marching'} through the ${eng.n}³ box.`;
+    const gpuCic = S.v1 === 'cic' && eng.lastPath === 'GPU' && eng.gpuActive(P);
+    this.capV.textContent = `${FNAME[S.v1]}: ${S.vm === 'mip' ? 'maximum-intensity projection' : 'emission-absorption ray marching'} through the ${eng.n}³ box.`
+      + (S.v1 === 'sheet' ? ` CPU only: about 1 s at 64³, 4 s at 96³${eng.n >= 128 ? '; at 128³ this takes tens of seconds, prefer CIC or Hopf–Cole' : ''}.` : '')
+      + (gpuCic ? ' GPU CIC deposits 18-bit fixed-point weights with integer atomics (mass conserved exactly); a cell would overflow at ρ/ρ̄ ≥ 16384.' : '');
     this.drawVolume();
     this.pv.root.classList.remove('is-stale');
     this.updateSliceRange();
@@ -142,6 +162,7 @@ export class Fields3D {
     if (!eng.sim) return;
     if (!this.fvS) { this.fvS = new FieldView(this.cvS, { cmap: S.c2 }); this.fvSInit = this.fvS.init(); }
     await this.fvSInit;
+    await eng.need('field', S.s1, P);
     const n = eng.n;
     const idx = Math.max(0, Math.min(n - 1, Math.round(S.si * (n - 1))));
     const rho = eng.rho(S.s1, P);
@@ -167,6 +188,7 @@ export class Fields3D {
     if (!this[key]) { this[key] = new FieldView(this['cvF' + slot], { cmap: abs ? S.c3 : S.c4 }); this[key + 'Init'] = this[key].init(); }
     await this[key + 'Init'];
     const fv = this[key], n = eng.n;
+    await eng.need('analysis', S.fo, P);
     const m = eng.fmaps(S.fo, P);
     const arr = abs ? m.amp : m.phase;
     // fourier_* maps are [ikx*n + iky]; transpose so that kx is horizontal
@@ -179,7 +201,7 @@ export class Fields3D {
     fv.draw();
     const r = fv.getRange();
     renderColorbar(this['barF' + slot], cmap, r.vmin, r.vmax, { label: abs ? 'log₁₀|δ̂|/max' : 'arg δ̂ [rad]' });
-    const what = { cic: 'CIC', hc: 'Hopf–Cole', lin: 'linear' }[S.fo];
+    const what = { cic: 'CIC', sheet: 'sheet', hc: 'Hopf–Cole', lin: 'linear' }[S.fo];
     this['capF' + slot].textContent = abs
       ? `log₁₀|δ̂(k)|/max of the ${what} density in the k_z = 0 plane (k_x horizontal, k_y vertical, k = 0 at the centre).`
       : `Phase of δ̂(k) of the ${what} density in the k_z = 0 plane. Mode coupling correlates the phases of generated modes with those of their parents.`;

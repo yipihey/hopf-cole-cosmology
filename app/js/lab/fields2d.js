@@ -80,6 +80,12 @@ class Slot {
 
   markStale(b) { this.root.classList.toggle('is-stale', b); }
 
+  /** True when the panel shows something derived from the Hopf-Cole solution (recomputed by the fast nu path). */
+  dependsOnHc() {
+    const { kind, sub } = this.cfg;
+    return ['hc', 'phi', 'lnpsi', 'psihat', 'speed'].includes(kind) || ((kind === 'fabs' || kind === 'fphase') && sub === 'hc');
+  }
+
   isFast() { return this.cfg.def.gpu && this.app.gpu; }
 
   async ensureFV() {
@@ -222,12 +228,14 @@ export class Fields2D {
   redrawAll() { this.slots.forEach((s, i) => this.app.runPanel(this, i)); }
   markStale(b, keepFast = false) { this.slots.forEach((s) => s.markStale(b && !(keepFast && s.isFast()))); }
   fastUpdate(P) { let any = false; for (const s of this.slots) any = s.fastUpdate(P) || any; return any; }
-  tasks(P) {
+  tasks(P, hcOnly = false) {
     return this.slots.map((s, i) => ({
       label: `panel ${i + 1}: ${CATALOG[s.cfg.kind].label}`,
-      heavy: !s.isFast(),
+      heavy: !s.isFast() && !hcOnly,
       fn: () => s.update(P),
-    }));
+      hc: s.dependsOnHc(),
+    })).filter((t) => !hcOnly || t.hc);
   }
+  markStaleHc(b) { this.slots.forEach((s) => s.markStale(b && s.dependsOnHc())); }
   destroy() { this.ro.disconnect(); this.slots.forEach((s) => s.destroy()); this.root.remove(); }
 }

@@ -9,6 +9,7 @@ const NOTES = [
     html: `Cold dark matter occupies a thin three-dimensional sheet in six-dimensional phase space (in 2D mode: a two-dimensional sheet in four-dimensional phase space).
       Every Lagrangian label <b>q</b> is carried to <b>x</b>(q, D) = q + ΣₙDⁿ Ψ⁽ⁿ⁾(q), where the displacement terms Ψ⁽ⁿ⁾ are built recursively from the initial field.
       The density is the sum of 1/|J| over all points of the sheet that project onto the same <b>x</b>, with J = det ∂x/∂q. Where J reaches zero the sheet folds over itself (shell crossing) and the density has caustics; beyond it several streams overlap.
+      In 3D the sheet density is evaluated exactly the same way on the CPU: every Lagrangian cube is cut into six Kuhn tetrahedra, each carrying mass Δq³/6, and every Eulerian sample point inside a deformed tetrahedron receives its mass over its volume (summed over streams); it is point-sampled (about 1 s at 64³), whereas CIC deposits the particles and blurs the result.
       The GPU panel draws every triangle of the deformed grid with additive blending, so overlapping streams add up exactly as they should; the “wire” view shows the folds themselves.
       The growth factor D plays the role of time; with σ0 = 1, D is the rms of the linear density contrast.`,
   },
@@ -18,7 +19,8 @@ const NOTES = [
       The Hopf–Cole substitution ψ = exp(−Φ/2ν), u = ∇Φ turns the nonlinear equation into the linear heat equation ∂_Dψ = ν∇²ψ, which can be solved exactly (a Fourier multiplier exp(−νk²D), or a convolution with a Gaussian).
       As ν → 0 the solution reduces to the Hopf–Lax (Lagrangian minimum) formula, and as long as the Lagrangian map q ↦ x is one-to-one, that is the Zel’dovich map. So for LPT order 1, D below D_sc(1) and small ν, the sheet and Hopf–Cole density panels and their spectra coincide.
       After shell crossing the sheet keeps folding and multi-stream regions appear, whereas the Hopf–Cole solution glues the streams into shocks of width ∼√(νD).
-      Higher LPT orders improve the sheet before D_sc but do not change what happens at the singularity.`,
+      Higher LPT orders improve the sheet before D_sc but do not change what happens at the singularity.
+      Lowering Ω_m below one (flat ΛCDM) changes only the time dependence: the growth functions of every LPT term, including the linear D(a), are integrated numerically from the exact equations instead of being the pure powers Dⁿ of Einstein–de Sitter, so the readout g_τ(D)/Dⁿ departs from the EdS constants (−3/7, …) as D grows; the Hopf–Cole solution depends on D only and is unchanged.`,
   },
   {
     title: 'The Fourier method and its dynamic range',
