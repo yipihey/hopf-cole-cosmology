@@ -185,3 +185,50 @@ pub fn spectrum_1d(f: &[f64]) -> Vec<f64> {
     let h = eng.forward_real(f);
     h.iter().map(|v| v.norm() / f.len() as f64).collect()
 }
+
+/// Spectral derivative df/dx on a periodic 1D grid of length l.
+#[wasm_bindgen]
+pub fn derivative_1d(f: &[f64], l: f64) -> Vec<f64> {
+    let grid = crate::grid::Grid::new(1, f.len(), l);
+    let mut eng = crate::fft::FftEngine::new(&grid);
+    let h = eng.forward_real(f);
+    crate::fft::gradient_component(&mut eng, &h, 0)
+}
+
+/// Zel'dovich velocity u0 = -dϕ/dx with ϕ'' = δ0 (periodic, mean removed).
+#[wasm_bindgen]
+pub fn zeldovich_velocity_1d(delta0: &[f64], l: f64) -> Vec<f64> {
+    let grid = crate::grid::Grid::new(1, delta0.len(), l);
+    let mut eng = crate::fft::FftEngine::new(&grid);
+    let dh = eng.forward_real(delta0);
+    let ph = crate::fft::inv_laplacian_hat(&grid, &dh);
+    let g = crate::fft::gradient_component(&mut eng, &ph, 0);
+    g.iter().map(|v| -v).collect()
+}
+
+/// Multi-stream 1D sheet density: Lagrangian points q_i = i dq mapped to x_i (unwrapped);
+/// each segment carries mass dq and deposits dq/|dx| at the Eulerian cell centres it covers.
+#[wasm_bindgen]
+pub fn sheet_density_1d(x: &[f64], l: f64, ne: usize) -> Vec<f64> {
+    let n = x.len();
+    let dq = l / n as f64;
+    let dxe = l / ne as f64;
+    let mut rho = vec![0.0; ne];
+    for i in 0..n {
+        let a = x[i];
+        let b = if i + 1 < n { x[i + 1] } else { x[0] + l };
+        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+        let len = hi - lo;
+        if len < 1e-12 {
+            continue;
+        }
+        let dens = dq / len;
+        let c0 = ((lo / dxe) - 0.5).ceil() as i64;
+        let c1 = ((hi / dxe) - 0.5).floor() as i64;
+        for c in c0..=c1 {
+            let idx = c.rem_euclid(ne as i64) as usize;
+            rho[idx] += dens;
+        }
+    }
+    rho
+}

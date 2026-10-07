@@ -102,15 +102,16 @@ pub fn hopf_cole_1d(u0: &[f64], l: f64, nu: f64, t: f64) -> HopfCole1D {
     let phi0 = eng.inverse_to_real(phi0h);
     let pmin = phi0.iter().cloned().fold(f64::INFINITY, f64::min);
     let psi0: Vec<f64> = phi0.iter().map(|p| (-(p - pmin) / (2.0 * nu)).exp()).collect();
-    let mut psih = eng.forward_real(&psi0);
-    let psihat0_abs: Vec<f64> = psih.iter().map(|v| v.norm()).collect();
-    for i in 0..n {
-        let k = grid.k1(i);
-        psih[i] *= (-nu * k * k * t).exp();
-    }
+    let psih0 = eng.forward_real(&psi0);
+    let psihat0_abs: Vec<f64> = psih0.iter().map(|v| v.norm()).collect();
+    // log-domain heat-kernel convolution (stable for any ν); full window
+    let a: Vec<f64> = phi0.iter().map(|p| -(p - pmin) / (2.0 * nu)).collect();
+    let lnpsi = crate::hopfcole::log_heat_convolve(&grid, &a, nu, t, n / 2);
+    let lmax = lnpsi.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let psi: Vec<f64> = lnpsi.iter().map(|v| (v - lmax).exp()).collect();
+    let psih = eng.forward_real(&psi);
     let psihat_abs: Vec<f64> = psih.iter().map(|v| v.norm()).collect();
-    let psi = eng.inverse_to_real(psih);
-    let phi: Vec<f64> = psi.iter().map(|p| -2.0 * nu * p.max(1e-300).ln() + pmin).collect();
+    let phi: Vec<f64> = lnpsi.iter().map(|v| -2.0 * nu * (v - lmax) + pmin).collect();
     let phih = eng.forward_real(&phi);
     // u' = Φ_x, then shift x → x - ū t  (multiply by e^{-ik ū t})
     let mut uh: Vec<C64> = (0..n)
@@ -174,24 +175,37 @@ pub fn inviscid_1d(u0: &[f64], l: f64, t: f64) -> Inviscid1D {
     if t <= 0.0 {
         return Inviscid1D { x_char, u: u0.to_vec(), x0_star: (0..n).map(|i| i as f64 * dx).collect(), rho: vec![1.0; n], phi: phi0 };
     }
-    let (phi_s, ystar) = hopf_lax_1d(&phi0, l, t);
-    // u' = dΦ/dx via central differences; shift by mean flow (ignore ū for the inviscid map: apply as x → x - ū t)
+    let (phi_s, ystar0) = hopf_lax_1d(&phi0, l, t);
+    // refine the grid-quantized minimizer with one Newton step on the
+    // quadratically interpolated Φ0:  Φ0'(y) - (x - y)/t = 0
+    let mut ystar = vec![0.0; n];
+    for i in 0..n {
+        let x = i as f64 * dx;
+        let yj = ystar0[i];
+        let j = (yj / dx).round() as i64;
+        let ju = j.rem_euclid(n as i64) as usize;
+        let jp = (ju + 1) % n;
+        let jm = (ju + n - 1) % n;
+        let d1 = (phi0[jp] - phi0[jm]) / (2.0 * dx);
+        let d2 = (phi0[jp] - 2.0 * phi0[ju] + phi0[jm]) / (dx * dx);
+        let g = d1 - (x - yj) / t;
+        let h = d2 + 1.0 / t;
+        let mut y = yj;
+        if h > 0.0 {
+            let step = -g / h;
+            if step.abs() <= dx { y = yj + step; }
+        }
+        ystar[i] = y;
+    }
     let mut u = vec![0.0; n];
     let mut rho = vec![0.0; n];
     for i in 0..n {
         let ip = (i + 1) % n;
         let im = (i + n - 1) % n;
-        let mut dphi = phi_s[ip] - phi_s[im];
-        // unwrap is not needed for Φ (periodic); y* needs unwrapping
         let mut dy = ystar[ip] - ystar[im];
         if dy > l / 2.0 { dy -= l; }
         if dy < -l / 2.0 { dy += l; }
-        if ip == 0 || im == n - 1 { dphi = phi_s[ip] - phi_s[im]; }
-        u[i] = dphi / (2.0 * dx) + ubar;
         rho[i] = (dy / (2.0 * dx)).max(0.0);
-    }
-    // the "u = (x - y*)/t" form is exact where Φ is differentiable; use it instead of FD for u
-    for i in 0..n {
         let x = i as f64 * dx;
         let mut dxy = x - ystar[i];
         if dxy > l / 2.0 { dxy -= l; }

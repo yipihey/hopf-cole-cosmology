@@ -340,7 +340,7 @@ export class VolumeView {
   _camera() {
     const c = this.cam, ce = Math.cos(c.elevation), se = Math.sin(c.elevation);
     const dir = [ce * Math.cos(c.azimuth), ce * Math.sin(c.azimuth), se];       // from target to eye
-    const dist = c.ortho ? 3 : 3.2 / c.zoom;
+    const dist = c.ortho ? 3 : 3.7 / c.zoom;
     const eye = dir.map((x) => x * dist);
     const fwd = dir.map((x) => -x);
     // right = fwd x zhat, up = right x fwd

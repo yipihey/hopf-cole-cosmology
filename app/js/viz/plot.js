@@ -262,7 +262,7 @@ export class WaterfallPlot extends LinePlot {
     this._off = off;
     const cm = COLORMAPS[this.colormap] || COLORMAPS.viridis;
     return this.series.map((s, k) => {
-      const c = cm(K > 1 ? 0.05 + 0.85 * k / (K - 1) : 0.5);
+      const c = cm(K > 1 ? 0.15 + 0.7 * k / (K - 1) : 0.5);
       const y = new Float64Array(s.y.length);
       for (let i = 0; i < y.length; i++) y[i] = s.y[i] + k * off;
       return { ...s, y, base: k * off, label: undefined, _label: s.label, color: s.color || `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})` };
