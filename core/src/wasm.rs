@@ -101,6 +101,44 @@ impl CosmoSim {
     pub fn term_g(&self, d: f64) -> Vec<f64> {
         self.inner.lpt.as_ref().map(|l| (0..l.terms.len()).map(|t| l.growth.g_and_dg(t, d).0).collect()).unwrap_or_default()
     }
+    /// Term structure for rebuilding the spatial recursion elsewhere (e.g. on the GPU):
+    /// flat [kind, a, b, c] per term with kind 0 = linear (S = -∇ϕ), 1 = μ2(a,b),
+    /// 2 = μ3(a,b,c), 3 = curl(a,b) (ε_{ijk} S^a_{lj} S^b_{lk}); unused slots are 0.
+    /// In EdS the terms are already merged per order and carry their coefficients,
+    /// so the per-order structure is kind 1 with the full Rampf–Hahn sources (see lpt.rs);
+    /// use `term_specs_unmerged` for the raw recursion in that case.
+    pub fn term_parents(&self) -> Vec<u32> {
+        use crate::growth::Parents;
+        self.inner.lpt.as_ref().map(|l| l.terms.iter().flat_map(|t| match t.spec.parents {
+            Parents::Linear => [0u32, 0, 0, 0],
+            Parents::Mu2(a, b) => [1, a as u32, b as u32, 0],
+            Parents::Mu3(a, b, c) => [2, a as u32, b as u32, c as u32],
+            Parents::Curl(a, b) => [3, a as u32, b as u32, 0],
+        }).collect()).unwrap_or_default()
+    }
+    /// The unmerged term list for the current (max built) order: flat [order, kind, a, b, c]
+    /// per term, plus the EdS coefficient c_τ via `term_coefs_unmerged` (g_τ = c_τ D^order in EdS).
+    pub fn term_specs_unmerged(&self) -> Vec<u32> {
+        use crate::growth::{term_specs, Parents};
+        let order = self.inner.built_order().max(1);
+        term_specs(order, self.inner.grid.dim).iter().flat_map(|t| {
+            let (k, a, b, c) = match t.parents { Parents::Linear => (0, 0, 0, 0), Parents::Mu2(a, b) => (1, a, b, 0), Parents::Mu3(a, b, c) => (2, a, b, c), Parents::Curl(a, b) => (3, a, b, 0) };
+            [t.order as u32, k, a as u32, b as u32, c as u32]
+        }).collect()
+    }
+    pub fn term_coefs_unmerged(&self) -> Vec<f64> {
+        use crate::growth::{term_specs, Growth};
+        let order = self.inner.built_order().max(1);
+        match Growth::new_eds(&term_specs(order, self.inner.grid.dim)) { Growth::Eds { coef, .. } => coef, _ => vec![] }
+    }
+    /// g_τ(D) for the *unmerged* term list (ΛCDM tables or EdS c_τ D^n).
+    pub fn term_g_unmerged(&self, d: f64) -> Vec<f64> {
+        use crate::growth::{term_specs, Growth, Cosmology};
+        let order = self.inner.built_order().max(1);
+        let specs = term_specs(order, self.inner.grid.dim);
+        let g = if self.inner.cosmo.is_eds() { Growth::new_eds(&specs) } else { Growth::new_lcdm(self.inner.cosmo, &specs, 20.0, 4000) };
+        (0..specs.len()).map(|t| g.g_and_dg(t, d).0).collect()
+    }
     pub fn term_labels(&self) -> Vec<String> { self.inner.lpt.as_ref().map(|l| l.term_labels()).unwrap_or_default() }
     pub fn term_orders(&self) -> Vec<u32> { self.inner.lpt.as_ref().map(|l| l.terms.iter().map(|t| t.spec.order as u32).collect()).unwrap_or_default() }
     pub fn term_growth(&self, d: f64) -> Vec<f64> {
