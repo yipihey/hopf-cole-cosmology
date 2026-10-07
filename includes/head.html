@@ -1,0 +1,8 @@
+<script>
+  // Mark the document when WebGPU is unavailable so CSS/JS can fall back to Canvas2D.
+  if (!("gpu" in navigator)) {
+    document.documentElement.classList.add("no-webgpu");
+  } else {
+    document.documentElement.classList.add("webgpu");
+  }
+</script>

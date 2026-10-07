@@ -1,0 +1,211 @@
+---
+title: "The Hopf–Cole transform"
+jupyter: hcc
+---
+
+## A change of variables that removes the nonlinearity
+
+The claim, found independently by Eberhard Hopf (1950) and Julian Cole
+(1951) and in fact already known to Forsyth (1906) and Florin (1948), is
+that Burgers' equation
+
+$$
+u_t + u u_x = \nu u_{xx}
+$$
+
+can be mapped *exactly* onto the linear heat equation. Advection models
+inertia; how can inertia simply disappear? Let us derive it and then
+understand it.
+
+### Step 1: the potential
+
+For a one-dimensional flow (or, in more dimensions, a curl-free flow) write
+the velocity as the gradient of a **velocity potential**,
+$u = \Phi_x$. Then $u u_x = \partial_x\!\left(\tfrac12 \Phi_x^2\right)$ and the
+equation can be integrated once in $x$:
+
+$$
+\Phi_t + \tfrac12 \Phi_x^2 = \nu \Phi_{xx}.
+$$ {#eq-hj}
+
+This is a (viscous) **Hamilton–Jacobi equation**, $\Phi_t + H(\Phi_x) = \nu
+\Phi_{xx}$ with the free-particle Hamiltonian $H(p) = p^2/2$. It is also, up to
+a sign and a noise term, the **Kardar–Parisi–Zhang** equation for a growing
+interface of height $h = -\Phi$: $h_t = \nu h_{xx} + \tfrac12 h_x^2 + \eta$.
+(KPZ is the Burgers equation for $u = -h_x$; Martin Hairer's 2014 Fields
+Medal was in part for making sense of the noisy version.)
+
+### Step 2: the exponential
+
+Now substitute
+
+$$
+\psi = e^{-\Phi/2\nu}, \qquad \Phi = -2\nu \ln\psi .
+$$ {#eq-hc}
+
+Differentiate: $\psi_t = -\frac{\Phi_t}{2\nu}\psi$, $\psi_x =
+-\frac{\Phi_x}{2\nu}\psi$ and
+
+$$
+\psi_{xx} = \left(-\frac{\Phi_{xx}}{2\nu} + \frac{\Phi_x^2}{4\nu^2}\right)\psi .
+$$
+
+So $\nu\psi_{xx} = \left(-\tfrac12\Phi_{xx} + \tfrac{1}{4\nu}\Phi_x^2\right)\psi$
+and, using @eq-hj,
+$\psi_t = -\frac{1}{2\nu}\left(\nu\Phi_{xx} - \tfrac12\Phi_x^2\right)\psi$, which
+is the same expression. Therefore
+
+$$
+\boxed{\;\psi_t = \nu\,\psi_{xx}\;}
+$$ {#eq-heat-psi}
+
+The quadratic term produced by differentiating the exponential twice is
+precisely the quadratic term of the Hamilton–Jacobi equation; the factor
+$2\nu$ in the exponent is chosen so that they cancel. Nothing else works: the
+transform is special to Burgers' equation (and to the whole family of
+Hamilton–Jacobi equations with quadratic Hamiltonian and Laplacian
+viscosity, in any dimension).
+
+::: {.callout-note title="Recipe: exact solution of Burgers' equation"}
+Given $u_0(x)$ and $\nu$, for any time $t$:
+
+1. Integrate: $\Phi_0(x) = \int^x u_0\,dx'$. On a periodic box subtract the
+   mean velocity $\bar u$ first (Galilean invariance lets us add it back as
+   a shift $x \to x - \bar u t$ at the end).
+2. Exponentiate: $\psi_0 = e^{-\Phi_0/2\nu}$.
+3. Diffuse: $\hat\psi_k(t) = \hat\psi_k(0)\,e^{-\nu k^2 t}$, or equivalently
+   $\psi(\cdot,t) = G_t * \psi_0$.
+4. Take the log and differentiate: $u(x,t) = -2\nu\,\partial_x \ln\psi(x,t)$.
+
+Steps 1 and 4 are nonlinear but *local in time*; step 3 is linear. All of
+the mode coupling of @eq-burgers-conv has been pushed into the exponential and
+the logarithm.
+:::
+
+```{=html}
+<div class="hcc-widget" data-widget="hopfcole1d"></div>
+<script type="module" src="../app/js/widgets.js"></script>
+```
+
+::: {.callout-tip title="Try it"}
+The panel walks through the recipe. Move $t$ and watch all four stages at
+once: $u$ steepens into a shock while $\psi$ merely diffuses, and
+$|\hat\psi_k|$ is multiplied by the same Gaussian as in the previous chapter.
+Lower $\nu$ and notice the **dynamic range** of $\psi$: because
+$\psi \propto e^{-\Phi/2\nu}$, a potential difference of a few units at
+$\nu = 10^{-3}$ spans thousands of e-folds. We will have to be careful
+about this in the numerics.
+:::
+
+```{python}
+#| code-fold: true
+#| fig-cap: "The notebook's test: the sech pulse at ν = 0.009 integrated with the pseudo-spectral RK solver (solid) and reconstructed from the exact Hopf–Cole solution (dashed). Right: ψ on a log scale; the whole nonlinear evolution is a Gaussian blur of this curve."
+#| label: fig-hc-check
+import numpy as np, matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+L, N, nu, T = 2.0, 512, 0.009, 0.45
+dx = L/N; x = np.arange(-L/2, L/2, dx); k = 2*np.pi*np.fft.fftfreq(N, d=dx)
+u0 = 1/np.cosh(x/(L/20))
+def rhs(t, u):
+    uh = np.fft.fft(u)
+    return -u*np.fft.ifft(1j*k*uh).real + nu*np.fft.ifft(-k**2*uh).real
+ts = np.linspace(0, T, 7)
+u_rk = solve_ivp(rhs, (0, T), u0, t_eval=ts, rtol=1e-9, atol=1e-12).y.T
+
+ubar = u0.mean(); up = u0 - ubar
+Phi0 = np.fft.ifft(np.where(k != 0, np.fft.fft(up)/(1j*np.where(k == 0, 1, k)), 0)).real
+psi0 = np.exp(-(Phi0 - Phi0.min())/(2*nu))
+def hopf_cole(t):
+    psi = np.fft.ifft(np.fft.fft(psi0)*np.exp(-nu*k**2*t)).real
+    Phi = -2*nu*np.log(psi)
+    up_t = np.fft.ifft(1j*k*np.fft.fft(Phi)*np.exp(-1j*k*ubar*t)).real
+    return up_t + ubar, psi
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4))
+for i, t in enumerate(ts):
+    u_hc, psi = hopf_cole(t)
+    c = plt.cm.viridis(i/len(ts))
+    a1.plot(x, u_rk[i], color=c, lw=1.5); a1.plot(x, u_hc, "--", color="k", lw=0.8)
+    a2.semilogy(x, psi, color=c, label=f"t = {t:.2f}")
+a1.set_xlabel("x"); a1.set_ylabel("u"); a1.set_title("RK (solid) vs Hopf–Cole (dashed)")
+a2.set_xlabel("x"); a2.set_ylabel(r"$\psi$"); a2.legend(fontsize=8); a2.set_title(r"$\psi = e^{-\Phi/2\nu}$ just diffuses")
+plt.tight_layout()
+```
+
+## What the transform means
+
+### $\psi$ is a Boltzmann weight
+
+Write the solution of the heat equation in kernel form and insert
+@eq-hc:
+
+$$
+\psi(x,t) = \int \frac{dy}{\sqrt{4\pi\nu t}}\,
+\exp\!\left[-\frac{1}{2\nu}\left(\Phi_0(y) + \frac{(x-y)^2}{2t}\right)\right].
+$$ {#eq-hopf-integral}
+
+This is the **Hopf integral**. The exponent is the action of a free particle
+that starts at $y$ with "initial potential" $\Phi_0(y)$ and arrives at $x$
+after time $t$ with kinetic energy $(x-y)^2/2t$; $2\nu$ plays the role of a
+temperature (or of $\hbar$). The velocity $u = \Phi_x$ is the gradient of the
+free energy $\Phi = -2\nu\ln\psi$. Burgers' equation is the equation of
+motion of a free particle *averaged over thermal fluctuations*, and the
+Hopf–Cole transform is nothing but the statement that a sum over paths of a
+free particle is Gaussian.
+
+### The inviscid limit is a minimum
+
+As $\nu \to 0$ the integral @eq-hopf-integral is dominated by the point
+$y_\star(x,t)$ that minimizes the exponent (Laplace's method). The result is
+the **Hopf–Lax formula** (also called the Lax–Oleinik formula)
+
+$$
+\Phi(x,t) = \min_y \left[\Phi_0(y) + \frac{(x-y)^2}{2t}\right], \qquad
+u(x,t) = \frac{x - y_\star}{t} = u_0(y_\star).
+$$ {#eq-hopf-lax}
+
+The second equality is the characteristic solution @eq-char: $y_\star$ is the
+starting point of the characteristic that reaches $x$. Before $t_\star$ there
+is a single minimum and @eq-hopf-lax reproduces the smooth solution. After
+$t_\star$ several characteristics reach the same $x$ and the minimum selects
+one of them; where the winner switches, $u$ jumps. That jump *is* the shock,
+and the rule "take the global minimum" is exactly the Maxwell equal-area
+construction of thermodynamics. Viscosity has disappeared from the formula,
+but its memory survives as the selection rule: this is why the $\nu \to 0$
+limit of Burgers' equation is the physically correct **entropy solution**
+rather than the multi-valued one.
+
+### Multi-dimensional version
+
+Nothing above used one dimension except the ability to write $u = \Phi_x$.
+For a potential flow $\mathbf u = \nabla\Phi$ in $d$ dimensions,
+
+$$
+\partial_t \mathbf u + (\mathbf u\cdot\nabla)\mathbf u = \nu\nabla^2\mathbf u
+\;\Longleftrightarrow\;
+\Phi_t + \tfrac12|\nabla\Phi|^2 = \nu\nabla^2\Phi
+\;\Longleftrightarrow\;
+\psi_t = \nu\nabla^2\psi ,
+\quad \psi = e^{-\Phi/2\nu}.
+$$ {#eq-hc-nd}
+
+Potential flow is preserved by the equation (vorticity obeys a linear
+equation with no source), so the restriction costs nothing. This is the form
+we will use for cosmology, where the initial velocity of cold matter is a
+pure gradient.
+
+## Numerical caveats
+
+The recipe is exact, but step 2 is numerically brutal: $\psi_0 =
+e^{-\Phi_0/2\nu}$ ranges over $e^{\Delta\Phi/2\nu}$ orders of magnitude. The
+Fourier method computes the convolution with relative accuracy $\sim 10^{-16}$
+*of the largest value*, so wherever $\psi < 10^{-16}\max\psi$ the logarithm in
+step 4 is garbage. In double precision this limits the exponent range to
+$\Delta\Phi/2\nu \lesssim 30$; smaller viscosities require either more
+precision or a different algorithm. The cure, used throughout the laboratory,
+is to evaluate the convolution @eq-hopf-integral **in the log domain** with a
+log-sum-exp (the trick familiar from statistical mechanics and machine
+learning): the heat kernel is separable, so each axis costs one short
+log-sum-exp per grid point, and the method is stable all the way to
+$\nu \to 0$ where it turns into the discrete Hopf–Lax minimum
+@eq-hopf-lax. The next chapter looks more closely at what the two spaces
+buy us.

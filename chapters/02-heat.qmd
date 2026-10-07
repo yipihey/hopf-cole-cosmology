@@ -1,0 +1,119 @@
+---
+title: "The heat equation in real and Fourier space"
+jupyter: hcc
+---
+
+## Fourier's view: every mode on its own
+
+Consider the heat (diffusion) equation on a periodic interval of length $L$,
+
+$$
+\psi_t = \nu\,\psi_{xx}.
+$$ {#eq-heat}
+
+Expand $\psi(x,t) = \sum_k \hat\psi_k(t)\, e^{ikx}$ with $k = 2\pi n/L$.
+Because the equation is linear with constant coefficients, each mode evolves
+independently:
+
+$$
+\frac{d\hat\psi_k}{dt} = -\nu k^2 \hat\psi_k
+\quad\Longrightarrow\quad
+\hat\psi_k(t) = \hat\psi_k(0)\, e^{-\nu k^2 t}.
+$$ {#eq-heat-fourier}
+
+This is the whole solution. There is no time stepping, no stability
+constraint, no accumulation of error: one forward transform, a
+multiplication by the **Fourier multiplier** $e^{-\nu k^2 t}$, one inverse
+transform. Short wavelengths (large $k$) die first, which is why diffusion
+smooths. After a time $t$ only modes with $k \lesssim (\nu t)^{-1/2}$ survive;
+$\ell_{\rm diff} = \sqrt{\nu t}$ is the **diffusion length**.
+
+## The real-space view: a kernel
+
+The same solution can be written without any mention of Fourier modes. On the
+infinite line the solution with a delta-function initial condition is the
+**heat kernel**
+
+$$
+G_t(x) = \frac{1}{\sqrt{4\pi\nu t}}\, e^{-x^2/4\nu t},
+$$ {#eq-heat-kernel}
+
+a Gaussian of variance $2\nu t$ and unit integral. By linearity the solution
+for any initial condition is the superposition
+
+$$
+\psi(x,t) = \int G_t(x-y)\,\psi_0(y)\,dy = (G_t * \psi_0)(x).
+$$ {#eq-heat-conv}
+
+On a periodic domain the kernel is the periodic image sum
+$\sum_m G_t(x + mL)$, and for $t > 0$ the solution is infinitely smooth no
+matter how rough $\psi_0$ was.
+
+::: {.callout-important title="One solution, two descriptions"}
+@eq-heat-fourier and @eq-heat-conv are the *same* statement. The convolution
+theorem says that convolving with $G_t$ in real space is multiplying by
+$\hat G_t(k) = e^{-\nu k^2 t}$ in Fourier space. Each picture makes a
+different property obvious:
+
+* **Fourier**: the dynamics is *diagonal*. Modes never talk to each other.
+  Decay rates are read off instantly. Semi-group property
+  $e^{-\nu k^2 t_1} e^{-\nu k^2 t_2} = e^{-\nu k^2 (t_1+t_2)}$ is trivial.
+* **Real space**: the dynamics is *local*. Information spreads a distance
+  $\sqrt{\nu t}$; positivity is manifest ($G_t > 0$, so $\psi_0 \ge 0$ implies
+  $\psi \ge 0$); the maximum principle holds.
+
+Being able to switch between the two at will is the central skill of these
+notes, and it is exactly what the Hopf–Cole transform will buy us for a
+*nonlinear* equation.
+:::
+
+```{=html}
+<div class="hcc-widget" data-widget="heat1d"></div>
+<script type="module" src="../app/js/widgets.js"></script>
+```
+
+::: {.callout-tip title="Try it"}
+Pick a rough initial condition (the step or the noise) and advance time. The
+left panel shows $\psi(x,t)$ with the kernel $G_t$ drawn at the same scale;
+the right panel shows $|\hat\psi_k|$ with the multiplier $e^{-\nu k^2 t}$. The
+widths of the two curves are inverse to each other: $\sigma_x \sigma_k \sim 1$.
+:::
+
+```{python}
+#| code-fold: true
+#| fig-cap: "A square pulse diffusing. Left: real space; the dashed curve is the heat kernel at the latest time. Right: Fourier amplitudes; the dashed curve is the multiplier exp(−νk²t)."
+#| label: fig-heat
+import numpy as np, matplotlib.pyplot as plt
+L, N, nu = 2.0, 512, 0.002
+x = np.arange(-L/2, L/2, L/N); k = 2*np.pi*np.fft.fftfreq(N, d=L/N)
+psi0 = (np.abs(x) < 0.25).astype(float)
+times = [0, 0.5, 2, 8]
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4))
+for t in times:
+    psi = np.fft.ifft(np.fft.fft(psi0)*np.exp(-nu*k**2*t)).real
+    a1.plot(x, psi, label=f"t = {t}")
+    kk = np.fft.fftshift(k); a2.semilogy(kk, np.abs(np.fft.fftshift(np.fft.fft(psi)))/N + 1e-16, label=f"t = {t}")
+G = np.exp(-x**2/(4*nu*times[-1]))/np.sqrt(4*np.pi*nu*times[-1])
+a1.plot(x, G*0.5/G.max(), "k--", lw=1, label="heat kernel (scaled)")
+a2.semilogy(kk, np.exp(-nu*kk**2*times[-1])*0.25, "k--", lw=1, label=r"$e^{-\nu k^2 t}$ (scaled)")
+a1.set_xlabel("x"); a1.set_ylabel(r"$\psi$"); a1.legend(fontsize=8)
+a2.set_xlabel("k"); a2.set_ylabel(r"$|\hat\psi_k|$"); a2.set_xlim(-200, 200); a2.set_ylim(1e-7, 1); a2.legend(fontsize=8)
+plt.tight_layout()
+```
+
+## Why linearity is everything
+
+Try to repeat the Fourier argument for Burgers' equation. The term $u u_x$
+becomes, in Fourier space,
+
+$$
+\widehat{(u u_x)}_k = \frac{i}{2}\sum_{p+q=k} q\,\hat u_p\,\hat u_q ,
+$$ {#eq-burgers-conv}
+
+a **convolution**: mode $k$ is fed by all pairs $(p, q)$ with $p + q = k$. The
+modes are coupled, energy cascades from large to small scales, and we are
+back to time stepping. This mode-mode coupling is not a nuisance to be
+eliminated; it is the physics of shocks and, later, of the cosmic web. The
+remarkable fact of the next chapter is that a clever change of variable
+*moves all of the coupling into a single nonlinear transformation* applied
+before and after a purely linear evolution.

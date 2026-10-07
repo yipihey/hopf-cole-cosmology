@@ -1,0 +1,167 @@
+---
+title: "From Burgers to cosmology: Zel'dovich and the adhesion model"
+---
+
+## Cold matter as a sheet
+
+Dark matter at early times is *cold*: at every position there is a single
+velocity. In phase space the matter therefore occupies a thin
+$d$-dimensional sheet inside the $2d$-dimensional $(\mathbf x, \mathbf v)$
+space. Gravity folds and stretches this sheet, and it never tears. The
+natural description is **Lagrangian**: label each fluid element by its
+initial (comoving) position $\mathbf q$ and follow its trajectory
+
+$$
+\mathbf x(\mathbf q, t) = \mathbf q + \boldsymbol\Psi(\mathbf q, t).
+$$ {#eq-lagrangian-map}
+
+Mass conservation then gives the Eulerian density for free: a Lagrangian
+volume element $d^dq$ is mapped to $d^dx = J\,d^dq$ with the Jacobian
+$J = \det(\partial\mathbf x/\partial\mathbf q) = \det(\mathbf 1 + \nabla_q\boldsymbol\Psi)$,
+so
+
+$$
+1 + \delta(\mathbf x) = \sum_{\text{streams}} \frac{1}{|J(\mathbf q_s)|},
+$$ {#eq-density-jacobian}
+
+where the sum runs over all $\mathbf q_s$ that land at $\mathbf x$
+(one stream before the sheet folds, several afterwards).
+
+## Linear theory and the choice of clock
+
+In an expanding universe the linearized fluid equations for cold matter have
+a growing solution $\delta(\mathbf x, t) = D(t)\,\delta_0(\mathbf x)$ with the
+**linear growth factor** $D$. (For an Einstein–de Sitter universe $D = a$,
+the scale factor; for $\Lambda$CDM it grows a little more slowly at late
+times.) Everything that follows becomes simplest if we use $D$ itself as the
+time variable: the equations of motion for $\mathbf x(\mathbf q, D)$ read
+
+$$
+\frac{d^2\mathbf x}{dD^2} + \frac{3}{2D}\frac{d\mathbf x}{dD} = -\frac{3}{2D^2}\nabla_{\!x}\phi,
+\qquad \nabla_x^2\phi = \delta ,
+$$ {#eq-eom-D}
+
+in the EdS case (the $\Lambda$CDM corrections to the coefficients are at the
+percent level and are usually absorbed into $D$). Linearizing with
+$\delta = -\nabla_q\cdot\boldsymbol\Psi$ gives
+
+$$
+\boldsymbol\Psi^{(1)}(\mathbf q, D) = -D\,\nabla_q\varphi(\mathbf q),\qquad
+\nabla_q^2\varphi = \delta_0 .
+$$ {#eq-psi1}
+
+## The Zel'dovich approximation is Burgers' equation
+
+Zel'dovich (1970) proposed to take the linear displacement @eq-psi1
+seriously *beyond* linear theory: let each element keep moving in a straight
+line with its initial velocity,
+
+$$
+\mathbf x(\mathbf q, D) = \mathbf q - D\,\nabla_q\varphi(\mathbf q).
+$$ {#eq-za}
+
+With $D$ as time the velocity $\mathbf u \equiv d\mathbf x/dD = -\nabla_q\varphi(\mathbf q)$
+is constant along every trajectory. That is precisely the characteristic
+solution @eq-char of the inviscid Burgers equation. In Eulerian form:
+
+$$
+\partial_D \mathbf u + (\mathbf u\cdot\nabla)\mathbf u = 0 ,
+\qquad \mathbf u(\mathbf x, 0) = -\nabla\varphi(\mathbf x).
+$$ {#eq-za-burgers}
+
+The density follows from @eq-density-jacobian with
+$J = \det(\mathbf 1 - D\,\nabla\nabla\varphi) = \prod_i (1 - D\lambda_i)$ in terms of
+the eigenvalues $\lambda_i$ of the tidal tensor $\varphi_{,ij}$. The first
+**shell crossing** happens at $D_{\rm sc} = 1/\max_{\mathbf q}\lambda_1$
+along the direction of the largest eigenvalue: collapse is one-dimensional
+first, producing **pancakes**, then filaments, then nodes. This is the
+Burgers breaking time @eq-tstar in cosmological clothing.
+
+::: {.callout-note title="A remarkable fact about one dimension"}
+In one dimension (plane-parallel collapse) the force on a sheet depends only
+on how much mass lies on either side, which does not change until sheets
+cross. The Zel'dovich approximation is therefore *exact* in 1D up to shell
+crossing. In more dimensions it is only the first term of the Lagrangian
+perturbation series developed in the [next chapter](06-lpt.qmd).
+:::
+
+## Adhesion: switching the viscosity back on
+
+After shell crossing the Zel'dovich sheets pass through each other and the
+pancakes dissolve, whereas in reality gravity holds them together. Gurbatov,
+Saichev and Shandarin (1989) proposed to mimic this by adding a small
+viscosity to @eq-za-burgers,
+
+$$
+\partial_D \mathbf u + (\mathbf u\cdot\nabla)\mathbf u = \nu\nabla^2\mathbf u ,
+\qquad \nu \to 0^+ ,
+$$ {#eq-adhesion}
+
+the **adhesion model**. Streams that would cross instead *stick*: matter
+accumulates in thin shocks that are the pancakes, filaments and nodes of the
+cosmic web, and the Hopf–Lax construction of @eq-hopf-lax tells us exactly
+where they are. Because the flow is potential, we can solve @eq-adhesion in
+closed form with the Hopf–Cole transform. With the velocity potential
+$\Phi = -\varphi$ at $D = 0$,
+
+$$
+\psi(\mathbf x, D) = \int \frac{d^dq}{(4\pi\nu D)^{d/2}}
+\exp\!\left[\frac{1}{2\nu}\left(\varphi(\mathbf q) - \frac{|\mathbf x-\mathbf q|^2}{2D}\right)\right],
+\qquad
+\mathbf u = -2\nu\nabla\ln\psi .
+$$ {#eq-adhesion-hc}
+
+The **Eulerian** velocity field at any $D$ comes out of one convolution (or
+one Fourier multiplier), with no particles, no time stepping and no
+shell-crossing bookkeeping. The density follows from the inverse Lagrangian
+map $\mathbf q(\mathbf x) = \mathbf x - D\,\mathbf u(\mathbf x, D)$:
+
+$$
+1 + \delta(\mathbf x, D) = \det\frac{\partial\mathbf q}{\partial\mathbf x}
+= \det\!\big(\mathbf 1 - D\,\nabla\mathbf u\big)
+= \det\!\big(\mathbf 1 - D\,\nabla\nabla\Phi\big) .
+$$ {#eq-density-hc}
+
+Before shell crossing and as $\nu \to 0$ this equals the Zel'dovich density
+exactly (the laboratory checks this to better than $10^{-3}$ for a plane wave).
+Inside shocks $\nabla\mathbf u \sim -1/\nu$ and @eq-density-hc produces the
+thin, dense walls of the adhesion model.
+
+```{=html}
+<div class="hcc-widget" data-widget="zeldovich1d"></div>
+<script type="module" src="../app/js/widgets.js"></script>
+```
+
+::: {.callout-tip title="Try it: a one-dimensional universe"}
+Pick an initial density (a single wave gives a textbook pancake, the random
+field a miniature cosmic web). The upper panel is the **phase-space sheet**
+$(x, u)$: a line that tilts, steepens and finally folds into three streams at
+shell crossing. The lower panel compares three densities: the multi-stream
+sheet density @eq-density-jacobian, the adhesion density from
+@eq-density-hc at the chosen $\nu$, and the inviscid Hopf–Lax density, in
+which the fold has become a $\delta$-function. Increase $D$ past
+$D_{\rm sc}$ to see pancakes form; then raise $\nu$ to see them thicken.
+:::
+
+## Linear in $\psi$, nonlinear in $\delta$
+
+Pause on what @eq-adhesion-hc says. The field $\psi = e^{\varphi/2\nu}$
+evolves by *linear* diffusion, yet the density @eq-density-hc contains all
+orders in $\delta_0$. Expand the determinant: at first order
+$\delta \simeq D\,\nabla^2\Phi = D\,\delta_0$ (linear theory); at second order
+the products of second derivatives generate the mode coupling that we will
+quantify in [Chapter 7](07-mode-coupling.qmd); and the exponential in
+@eq-adhesion-hc resums the whole series. Just as in one dimension, the
+nonlinearity lives entirely in the exponential, the logarithm and the
+determinant, while the dynamics in between is a Fourier multiplier
+$e^{-\nu k^2 D}$ whose only job is to pick the right branch when streams
+cross.
+
+The approach has two shortcomings that the rest of these notes address:
+
+* The Zel'dovich / adhesion dynamics is only the **first order** of the true
+  gravitational dynamics. Higher orders, Chapter 6, add tidal and
+  acceleration terms that Burgers' equation does not know about.
+* The adhesion density inside shocks is not the true collapsed density;
+  real pancakes have a finite thickness set by the multi-stream dynamics
+  that the sheet method ([Chapter 6](06-lpt.qmd)) follows explicitly.

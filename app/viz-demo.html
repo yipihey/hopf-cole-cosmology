@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>hcc viz library demo</title>
+<link rel="stylesheet" href="css/hcc.css">
+<style>
+  body { margin: 0; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.1rem; margin: 1.6rem 0 .3rem; border-bottom: 1px solid var(--hcc-border); padding-bottom: .2rem; }
+  .cmap-strip { display: block; width: 100%; height: 22px; aspect-ratio: auto !important; margin-bottom: 2px; }
+  .cmap-row { display: grid; grid-template-columns: 6rem 1fr; align-items: center; gap: .5rem; font-size: .8125rem; }
+  .hcc-colorbar { color: inherit; }
+  a { color: var(--hcc-accent); }
+</style>
+</head>
+<body class="hcc-page-body">
+<div class="hcc-page">
+  <h1>hcc visualization library demo</h1>
+  <p class="hcc-note" id="env">Synthetic data only; no WASM. &nbsp;
+    <a id="toggle-gpu" href="#">...</a></p>
+
+  <h2>1. Colormaps and colorbars</h2>
+  <div class="hcc-grid2">
+    <div class="hcc-panel" id="cmap-panel"><div class="hcc-title">colormaps (<code>COLORMAPS</code>, <code>cmapLUT</code>)</div></div>
+    <div class="hcc-panel">
+      <div class="hcc-title">renderColorbar</div>
+      <div class="hcc-row" style="align-items:stretch;gap:1.5rem">
+        <canvas id="cb-v" class="hcc-colorbar" style="width:96px;height:220px;aspect-ratio:auto"></canvas>
+        <canvas id="cb-v2" class="hcc-colorbar" style="width:110px;height:220px;aspect-ratio:auto"></canvas>
+      </div>
+      <canvas id="cb-h" class="hcc-colorbar" style="width:100%;height:64px;aspect-ratio:auto"></canvas>
+    </div>
+  </div>
+
+  <h2>2. FieldView <span class="hcc-badge" id="b-field"></span></h2>
+  <div class="hcc-panel">
+    <div class="hcc-controls" id="field-ctl"></div>
+    <div class="hcc-with-bar" style="max-width:640px">
+      <div class="hcc-stage"><canvas id="field"></canvas></div>
+      <canvas id="field-bar" class="hcc-colorbar"></canvas>
+    </div>
+    <div class="hcc-controls" id="field-read"></div>
+  </div>
+
+  <h2>3. SheetView <span class="hcc-badge" id="b-sheet"></span></h2>
+  <div class="hcc-panel">
+    <div class="hcc-controls" id="sheet-ctl"></div>
+    <div class="hcc-with-bar" style="max-width:640px">
+      <div class="hcc-stage"><canvas id="sheet"></canvas></div>
+      <canvas id="sheet-bar" class="hcc-colorbar"></canvas>
+    </div>
+  </div>
+
+  <h2>4. VolumeView <span class="hcc-badge" id="b-vol"></span></h2>
+  <div class="hcc-panel">
+    <div class="hcc-controls" id="vol-ctl"></div>
+    <div class="hcc-with-bar" style="max-width:640px">
+      <div class="hcc-stage"><canvas id="vol"></canvas></div>
+      <canvas id="vol-bar" class="hcc-colorbar"></canvas>
+    </div>
+    <p class="hcc-note">WebGPU: drag to rotate, wheel to zoom, double-click to reset. Canvas2D fallback: three central slices.</p>
+  </div>
+
+  <h2>5. LinePlot and WaterfallPlot</h2>
+  <div class="hcc-grid2">
+    <div class="hcc-panel"><div class="hcc-title">LinePlot (log-log, markers, points)</div><div id="plot1"></div></div>
+    <div class="hcc-panel"><div class="hcc-title">LinePlot (linear, dashed)</div><div id="plot2"></div></div>
+  </div>
+  <div class="hcc-panel"><div class="hcc-title">WaterfallPlot (Burgers u(x,t) via Hopf-Cole)</div><div id="plot3" style="max-width:640px"></div></div>
+</div>
+
+<script type="module">
+import { COLORMAPS, cmapLUT, renderColorbar } from './js/viz/colormaps.js';
+import { FieldView } from './js/viz/fieldview.js';
+import { SheetView } from './js/viz/sheetview.js';
+import { VolumeView } from './js/viz/volumeview.js';
+import { LinePlot, WaterfallPlot } from './js/viz/plot.js';
+import { slider, select, checkbox, button, readout, row } from './js/viz/ui.js';
+
+const $ = (id) => document.getElementById(id);
+const nogpu = new URLSearchParams(location.search).has('nogpu');
+const toggle = $('toggle-gpu');
+toggle.textContent = nogpu ? 'forced Canvas2D (?nogpu) - click for WebGPU' : 'click to force Canvas2D (?nogpu)';
+toggle.href = nogpu ? location.pathname : '?nogpu=1';
+$('env').prepend(`navigator.gpu: ${'gpu' in navigator ? 'present' : 'absent'}. `);
+
+const views = (window.__hccDemo = { errors: [] });
+window.addEventListener('error', (e) => views.errors.push(String(e.message)));
+window.addEventListener('unhandledrejection', (e) => views.errors.push(String(e.reason)));
+
+// deterministic RNG --------------------------------------------------------
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const cmapNames = Object.keys(COLORMAPS);
+const cmapOptions = cmapNames.map((v) => ({ value: v, label: v }));
+
+// redraw a colorbar now and whenever its canvas is resized
+function liveBar(canvas, getArgs) {
+  const go = () => { const [name, lo, hi, o] = getArgs(); renderColorbar(canvas, name, lo, hi, o); };
+  new ResizeObserver(go).observe(canvas); go();
+  return go;
+}
+
+// 1. colormaps --------------------------------------------------------------
+{
+  const panel = $('cmap-panel');
+  for (const name of cmapNames) {
+    const r = document.createElement('div'); r.className = 'cmap-row'; panel.appendChild(r);
+    const lab = document.createElement('span'); lab.textContent = name; r.appendChild(lab);
+    const c = document.createElement('canvas'); c.className = 'cmap-strip'; c.width = 256; c.height = 1; r.appendChild(c);
+    const ctx = c.getContext('2d'), lut = cmapLUT(name, 256), img = ctx.createImageData(256, 1);
+    img.data.set(lut); ctx.putImageData(img, 0, 0);
+    c.style.imageRendering = 'auto';
+  }
+  const cv = $('cb-v'), cv2 = $('cb-v2'), ch = $('cb-h');
+  liveBar(cv, () => ['viridis', 0, 1, { label: 'linear [0, 1]' }]);
+  liveBar(cv2, () => ['magma', 1e-2, 1e3, { label: 'density (log)', log: true }]);
+  liveBar(ch, () => ['rdbu', -2.5, 2.5, { label: 'contrast δ', orientation: 'horizontal' }]);
+}
+
+// 2. FieldView --------------------------------------------------------------
+async function setupField() {
+  const n = 256, m = 320;
+  const R = rng(7), modes = [];
+  for (let q = 0; q < 60; q++) {
+    const k = 1 + Math.floor(R() * 7), th = R() * Math.PI * 2;
+    modes.push({ kx: k * Math.cos(th) * 2 * Math.PI, ky: k * Math.sin(th) * 2 * Math.PI, ph: R() * 6.283, a: 1.3 / Math.pow(k, 1.1) * (0.5 + R()) });
+  }
+  const delta = new Float32Array(n * m), rho = new Float32Array(n * m);
+  for (let r = 0; r < n; r++) for (let c = 0; c < m; c++) {
+    const x = c / m, y = r / n; let s = 0;
+    for (const md of modes) s += md.a * Math.cos(md.kx * x + md.ky * y + md.ph);
+    delta[r * m + c] = s; rho[r * m + c] = Math.exp(s);
+  }
+  const fv = await new FieldView($('field'), { cmap: 'magma' }).init();
+  $('b-field').textContent = fv.backend; views.field = fv;
+  const st = { which: 'rho', cmap: 'magma', log: true, sym: false, interp: false };
+  const bar = liveBar($('field-bar'), () => { const r = fv.getRange(); return [fv.cmap, r.vmin, r.vmax, { log: r.log, label: st.which === 'rho' ? 'ρ / ρ̅' : 'δ' }]; });
+  const update = () => {
+    fv.setField(st.which === 'rho' ? rho : delta, n, m);
+    fv.setColormap(st.cmap); fv.setInterpolate(st.interp);
+    fv.setRange(undefined, undefined, { log: st.log && st.which === 'rho', symmetric: st.sym });
+    fv.draw(); bar();
+  };
+  const ctl = $('field-ctl');
+  select(ctl, { label: 'field', options: [{ value: 'rho', label: 'density (lognormal)' }, { value: 'delta', label: 'contrast (signed)' }], value: 'rho',
+    onChange: (v) => { st.which = v; if (v === 'delta') { st.cmap = 'rdbu'; st.sym = true; cm.set('rdbu'); sym.set(true); } else { st.cmap = 'magma'; st.sym = false; cm.set('magma'); sym.set(false); } update(); } });
+  const cm = select(ctl, { label: 'cmap', options: cmapOptions, value: 'magma', onChange: (v) => { st.cmap = v; update(); } });
+  checkbox(ctl, { label: 'log (density only)', value: true, onChange: (v) => { st.log = v; update(); } });
+  const sym = checkbox(ctl, { label: 'symmetric', value: false, onChange: (v) => { st.sym = v; update(); } });
+  checkbox(ctl, { label: 'interpolate', value: false, onChange: (v) => { st.interp = v; update(); } });
+  const ro = readout($('field-read'), { label: 'cursor' });
+  ro.set('hover the image');
+  $('field').addEventListener('pointermove', (e) => { const p = fv.pick(e); ro.set(p ? `row ${p.row}, col ${p.col}: ${p.value.toPrecision(4)}` : '-'); fv._cursor = p; });
+  fv.setOverlay((ctx, w, h) => {
+    const R = fv.viewRect, dpr = window.devicePixelRatio || 1;
+    ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = dpr; ctx.setLineDash([6 * dpr, 4 * dpr]);
+    ctx.strokeRect(R.x + R.w * 0.25, R.y + R.h * 0.25, R.w * 0.5, R.h * 0.5);
+    ctx.setLineDash([]); ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.font = `${12 * dpr}px system-ui,sans-serif`;
+    ctx.fillText('overlay: setOverlay()', R.x + 8 * dpr, R.y + 18 * dpr);
+  });
+  update();
+}
+
+// 3. SheetView --------------------------------------------------------------
+async function setupSheet() {
+  const n = 128, L = 100;
+  const modes = [[1, 0, .5, 0.3], [0, 1, .4, 1.9], [1, 1, .3, 4.0], [2, 1, .2, 2.2], [1, -2, .15, 0.7], [3, 0, .1, 5.1]];
+  const pos = new Float32Array(2 * n * n);
+  const build = (D) => {
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      const qx = i * L / n, qy = j * L / n; let sx = 0, sy = 0;
+      for (const [kx, ky, A, ph] of modes) {
+        const k2 = kx * kx + ky * ky, s = Math.sin(2 * Math.PI * (kx * qx + ky * qy) / L + ph);
+        const c = A / k2 * L / (2 * Math.PI);
+        sx += c * kx * s; sy += c * ky * s;       // s = -grad(psi), psi ~ cos
+      }
+      const o = 2 * (i * n + j);
+      pos[o] = qx + D * sx; pos[o + 1] = qy + D * sy;  // unwrapped Eulerian positions
+    }
+  };
+  const sv = await new SheetView($('sheet'), { cmap: 'magma' }).init();
+  $('b-sheet').textContent = sv.backend; views.sheet = sv;
+  const st = { D: 1.4, mode: 'density', cmap: 'magma', log: true, vmin: 0.1, vmax: 100, alpha: 0.35 };
+  const bar = liveBar($('sheet-bar'), () => [st.cmap, st.log ? st.vmin : 0, st.vmax, { log: st.log, label: 'ρ / ρ̅ (streams summed)' }]);
+  const redraw = () => {
+    sv.draw({ mode: st.mode, cmap: st.cmap, vmin: st.log ? st.vmin : 0, vmax: st.vmax, log: st.log, wireAlpha: st.alpha }); bar();
+  };
+  const ctl = $('sheet-ctl');
+  slider(ctl, { label: 'growth D', min: 0, max: 3, step: 0.01, value: st.D, onInput: (v) => { st.D = v; build(v); sv.setMesh(pos, n, L); redraw(); } });
+  select(ctl, { label: 'mode', options: ['density', 'wire', 'both'].map((v) => ({ value: v, label: v })), value: 'density', onChange: (v) => { st.mode = v; redraw(); } });
+  select(ctl, { label: 'cmap', options: cmapOptions, value: 'magma', onChange: (v) => { st.cmap = v; redraw(); } });
+  checkbox(ctl, { label: 'log', value: true, onChange: (v) => { st.log = v; redraw(); } });
+  slider(ctl, { label: 'vmax', min: 1, max: 1e4, value: st.vmax, log: true, onInput: (v) => { st.vmax = v; redraw(); } });
+  slider(ctl, { label: 'wire alpha', min: 0.05, max: 1, step: 0.05, value: st.alpha, onInput: (v) => { st.alpha = v; redraw(); } });
+  build(st.D); sv.setMesh(pos, n, L); redraw();
+}
+
+// 4. VolumeView ---------------------------------------------------------------
+async function setupVolume() {
+  const n = 64, R = rng(11), modes = [];
+  for (let q = 0; q < 50; q++) {
+    const k = 1 + Math.floor(R() * 6), a = R() * 6.283, b = Math.acos(2 * R() - 1);
+    modes.push({ kx: k * Math.sin(b) * Math.cos(a) * 2 * Math.PI, ky: k * Math.sin(b) * Math.sin(a) * 2 * Math.PI, kz: k * Math.cos(b) * 2 * Math.PI, ph: R() * 6.283, a: 1.1 / Math.pow(k, 0.9) * (0.5 + R()) });
+  }
+  const data = new Float32Array(n * n * n);
+  let sum = 0;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) for (let k = 0; k < n; k++) {
+    const x = i / n, y = j / n, z = k / n; let s = 0;
+    for (const md of modes) s += md.a * Math.cos(md.kx * x + md.ky * y + md.kz * z + md.ph);
+    const v = Math.exp(s); data[(i * n + j) * n + k] = v; sum += v;
+  }
+  for (let q = 0; q < data.length; q++) data[q] /= sum / data.length;
+  const vv = await new VolumeView($('vol'), { cmap: 'inferno' }).init();
+  $('b-vol').textContent = vv.backend; views.vol = vv;
+  vv.setVolume(data, n);
+  const st = { mode: 'emission', axis: 2, index: n >> 1, opacity: 10, cmap: 'inferno', log: true, proj: 'perspective' };
+  const bar = liveBar($('vol-bar'), () => { const r = vv.getRange(); return [vv.cmap, r.vmin, r.vmax, { log: r.log, label: 'ρ / ρ̅' }]; });
+  const redraw = () => {
+    vv.setColormap(st.cmap); vv.setRange(undefined, undefined, { log: st.log }); vv.setCamera({ projection: st.proj });
+    vv.draw({ mode: st.mode, axis: st.axis, index: st.index, opacity: st.opacity }); bar();
+  };
+  const ctl = $('vol-ctl');
+  select(ctl, { label: 'mode', options: ['mip', 'emission', 'slice'].map((v) => ({ value: v, label: v })), value: st.mode, onChange: (v) => { st.mode = v; redraw(); } });
+  select(ctl, { label: 'cmap', options: cmapOptions, value: st.cmap, onChange: (v) => { st.cmap = v; redraw(); } });
+  select(ctl, { label: 'projection', options: ['perspective', 'orthographic'].map((v) => ({ value: v, label: v })), value: st.proj, onChange: (v) => { st.proj = v; redraw(); } });
+  checkbox(ctl, { label: 'log', value: true, onChange: (v) => { st.log = v; redraw(); } });
+  slider(ctl, { label: 'opacity', min: 0.5, max: 100, value: st.opacity, log: true, onInput: (v) => { st.opacity = v; redraw(); } });
+  select(ctl, { label: 'slice axis', options: [{ value: 0, label: 'x (i)' }, { value: 1, label: 'y (j)' }, { value: 2, label: 'z (k)' }], value: 2, onChange: (v) => { st.axis = +v; redraw(); } });
+  slider(ctl, { label: 'slice idx', min: 0, max: n - 1, step: 1, value: st.index, onInput: (v) => { st.index = Math.round(v); redraw(); } });
+  redraw();
+}
+
+// 5. Plots ---------------------------------------------------------------------
+function setupPlots() {
+  // power-spectrum-like data
+  const k = Array.from({ length: 120 }, (_, i) => 0.01 * Math.pow(10, 3 * i / 119));
+  const T = (q) => { const x = q / 0.02; return Math.pow(Math.log(1 + 2.34 * x) / (2.34 * x), 2) / Math.sqrt(1 + 0.3 * x + 0.1 * x * x); };
+  const lin = k.map((q) => 2e4 * Math.pow(q, 0.96) * T(q) ** 2 * (1 + 0.04 * Math.sin(q / 0.011)));
+  const nl = k.map((q, i) => lin[i] * (1 + Math.pow(q / 0.2, 1.5) * 8));
+  const R = rng(3), ks = k.filter((_, i) => i % 6 === 0);
+  const meas = ks.map((q) => 2e4 * Math.pow(q, 0.96) * T(q) ** 2 * (1 + Math.pow(q / 0.2, 1.5) * 8) * (1 + 0.15 * (R() - 0.5)));
+  const p1 = new LinePlot($('plot1'));
+  p1.setAxes({ xlog: true, ylog: true, xlabel: 'k  [h/Mpc]', ylabel: 'P(k)  [(Mpc/h)³]', title: 'Power spectrum' });
+  p1.setSeries([
+    { x: k, y: lin, label: 'linear', width: 1.8 },
+    { x: k, y: nl, label: 'non-linear', dash: '5 3' },
+    { x: ks, y: meas, label: 'measured', points: true, line: false },
+    { x: [0.01, 0.5, NaN, 1], y: [-1, 5, 3, 0], label: 'ignored (non-positive/NaN)', opacity: 0.4 },
+  ]);
+  p1.setMarkers([{ x: 0.2, label: 'k_nl', color: '#D55E00' }]);
+  p1.draw();
+
+  const x = Array.from({ length: 200 }, (_, i) => i / 199 * 2 * Math.PI);
+  const p2 = new LinePlot($('plot2'), { width: 520, height: 340 });
+  p2.setAxes({ xlabel: 'x', ylabel: 'u', title: 'Initial velocity', xlim: [0, 2 * Math.PI] });
+  p2.setSeries([
+    { x, y: x.map((v) => Math.sin(v)), label: 'sin x' },
+    { x, y: x.map((v) => Math.sin(v) + 0.5 * Math.sin(2 * v + 1)), label: 'u0', dash: '4 2', width: 2 },
+    { x, y: x.map((v) => 0.5 * Math.cos(3 * v)), label: 'cos 3x', points: true, width: 1 },
+  ]);
+  p2.setMarkers([{ x: Math.PI, label: 'π' }]);
+  p2.draw();
+
+  // Burgers via Hopf-Cole: u = (x - q*)/t, weights exp(-S/2nu), S = (x-q)^2/2t + phi0(q)
+  const nu = 0.02, phi0 = (q) => -Math.cos(q) - 0.25 * Math.cos(2 * q + 1), u0 = (q) => Math.sin(q) + 0.5 * Math.sin(2 * q + 1);
+  const nx = 400, xs = Float64Array.from({ length: nx }, (_, i) => i / nx * 2 * Math.PI);
+  const qs = Float64Array.from({ length: 3000 }, (_, i) => -2 * Math.PI + i / 3000 * 6 * Math.PI);
+  const times = [0, 0.4, 0.8, 1.2, 1.6, 2.0, 2.6, 3.2];
+  const series = times.map((t) => {
+    const u = new Float64Array(nx);
+    for (let i = 0; i < nx; i++) {
+      if (t === 0) { u[i] = u0(xs[i]); continue; }
+      let smin = Infinity; const S = new Float64Array(qs.length);
+      for (let j = 0; j < qs.length; j++) { const d = xs[i] - qs[j]; S[j] = d * d / (2 * t) + phi0(qs[j]); if (S[j] < smin) smin = S[j]; }
+      let num = 0, den = 0;
+      for (let j = 0; j < qs.length; j++) { const w = Math.exp(-(S[j] - smin) / (2 * nu)); num += w * (xs[i] - qs[j]) / t; den += w; }
+      u[i] = num / den;
+    }
+    return { x: xs, y: u, label: `t = ${t}`, width: 1.4 };
+  });
+  const p3 = new WaterfallPlot($('plot3'), { width: 620, height: 420 });
+  p3.setAxes({ xlabel: 'x', ylabel: 'u(x,t) + offset', title: 'Burgers, ν = 0.02', xlim: [0, 2 * Math.PI] });
+  p3.setSeries(series);
+  p3.draw();
+  views.plots = [p1, p2, p3];
+}
+
+for (const f of [setupField, setupSheet, setupVolume]) f().catch((e) => { console.error(f.name, e); views.errors.push(f.name + ': ' + e.message); });
+try { setupPlots(); } catch (e) { console.error(e); views.errors.push('plots: ' + e.message); }
+</script>
+</body>
+</html>

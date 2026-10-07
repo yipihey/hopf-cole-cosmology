@@ -1,0 +1,48 @@
+---
+title: "Hopf–Cole Cosmology"
+subtitle: "From Burgers' equation to the cosmic web, in your browser"
+toc: false
+---
+
+The **Hopf–Cole transform** turns the nonlinear Burgers equation into the
+linear heat equation. That single trick connects shock formation, the
+Kardar–Parisi–Zhang equation, Feynman's path integral, and the formation of
+cosmic structure: with the growth factor as the clock, cold dark matter in
+the Zel'dovich approximation moves exactly according to Burgers' equation,
+and the *adhesion model* of the cosmic web is its viscous version.
+
+These notes build the subject up from a lecture on Fourier methods for
+Burgers' equation to a working two- and three-dimensional cosmological
+solver that compares **Lagrangian perturbation theory to fourth order**
+(rendered as a phase-space sheet) with the **Hopf–Cole spectral solution**,
+side by side in real space and Fourier space. Everything is computed live in
+the browser with WebAssembly and drawn with WebGPU.
+
+<div class="hcc-cta">
+<a class="btn btn-primary btn-lg" href="chapters/01-burgers.qmd">Start reading</a>
+<a class="btn btn-outline-secondary btn-lg" href="app/index.html">Open the laboratory</a>
+</div>
+
+## What you will learn
+
+- Why the heat equation is "trivial" in Fourier space and "local" in real
+  space, and why having both views at once is so powerful.
+- How a change of variables moves all the mode coupling of a nonlinear
+  equation into an exponential and a logarithm.
+- Why the Zel'dovich approximation is Burgers' equation, and how the adhesion
+  model builds a cosmic web from a Fourier multiplier.
+- How to go beyond Zel'dovich with a general $n$-th order Lagrangian
+  perturbation theory recursion, and what a phase-space sheet is.
+- What mode coupling looks like in a Fourier amplitude map, what one-loop
+  perturbation theory predicts for the power spectrum, and why the effective
+  field theory of large-scale structure needs a counterterm.
+
+## Requirements
+
+The interactive panels need a modern browser with WebAssembly. WebGPU
+(Chrome, Edge, Safari 26, Firefox 141+) gives the fastest rendering; without
+it the pages fall back to Canvas2D. The 3D mode at $128^3$ needs about
+1 GB of memory.
+
+The source, including the Rust numerical core and this text, is at
+[github.com/yipihey/hopf-cole-cosmology](https://github.com/yipihey/hopf-cole-cosmology).

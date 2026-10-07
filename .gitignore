@@ -1,0 +1,16 @@
+/target
+/core/target
+/_site
+/.quarto
+/app/pkg
+/_freeze/**/*.pyc
+.DS_Store
+__pycache__/
+node_modules/
+
+/.quarto/
+**/*.quarto_ipynb
+.venv/
+_environment.local
+
+/_*.local

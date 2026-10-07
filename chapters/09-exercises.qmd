@@ -1,0 +1,75 @@
+---
+title: "Exercises"
+---
+
+The first three are the in-class exercises from the original notebook; the
+rest use the laboratory.
+
+## One dimension
+
+1. **A new pulse shape.** Repeat the integration of Burgers' equation for
+   $u_0 = \operatorname{sech}^2\!\big(x/(L/10)\big)$ with $\nu = 0.009$ to
+   $t = 0.25$, and compare the final profile with the $\operatorname{sech}$
+   pulse of @fig-burgers-waterfall. Which breaks first? Compute $t_\star$
+   from @eq-tstar for both and check against your plots.
+
+2. **Momentum conservation.** Evolve a uniform initial density together
+   with the pulse (as in @fig-burgers-density). Plot
+   $\int\rho u\,dx$ versus time. Explain the result using the conservation
+   form of the equations, and explain why $\int\tfrac12\rho u^2\,dx$ is not
+   conserved.
+
+3. **Hopf–Cole for the new pulse.** Compute $\Phi_0 = \int u_0\,dx$
+   analytically (sympy helps: $\int\operatorname{sech}^2 = \tanh$), construct
+   $\psi_0$ and the exact solution, and compare with exercise 1. At what
+   value of $\nu$ does the Fourier method fail in double precision for this
+   pulse, and why?
+
+4. **Cole's series.** Implement @eq-cole-series with `scipy.special.iv` and
+   compare it with the widget of [Chapter 4](04-two-spaces.qmd) for
+   $u_0 = \sin x$. How many terms are needed at $\nu = 0.01$ at $t = 1$ and
+   at $t = 3$?
+
+5. **Lower envelopes.** Write the $O(N)$ lower-envelope-of-parabolas
+   algorithm (Felzenszwalb & Huttenlocher) and use it to compute the
+   Hopf–Lax solution @eq-hopf-lax for a random periodic $\Phi_0$. Verify that
+   it agrees with the Hopf–Cole solution at small $\nu$ away from shocks and
+   that the density $dy_\star/dx$ integrates to the box mass.
+
+## The 2D laboratory
+
+6. **Shell crossing.** For a Gaussian field with $\sigma_0 = 1$ measure
+   $D_{\rm sc}$ for orders 1 to 4 at three smoothing scales. Explain the trend
+   with $R$ using the eigenvalue distribution of the tidal tensor
+   (Doroshkevich 1970).
+
+7. **Harmonics.** Two plane waves with $\mathbf k_1 = (2,0)$, $\mathbf k_2 = (0,3)$
+   and equal amplitudes. Read off the amplitude of the $(2,3)$ mode from the
+   Fourier map at two values of $D$ and verify the $D^2$ scaling and the
+   value of $F_2$ from @eq-f2. Repeat for the $(2,-3)$ mode and for 1LPT
+   (@eq-fza).
+
+8. **Zel'dovich damping.** With order 1 and the Hopf–Cole solver at small
+   $\nu$, measure $r(k)$ at $D = 0.2, 0.4, 0.6$ and fit a Gaussian; compare
+   $\sigma_v$ with the value computed from the linear spectrum.
+
+9. **Running of $c_s^2$.** Fix the seed and $D$; fit $c_s^2$ for five
+   smoothing scales $R$. Plot $c_s^2(\Lambda = 1/R)$ and compare with the
+   analytic prediction from the cutoff dependence of $P_{13}$ (a one-line
+   integral of $P_0$).
+
+10. **Adhesion web.** Push $D$ to $2D_{\rm sc}$ with $\nu$ at three values.
+    Describe how walls, filaments and nodes appear in the Hopf–Cole density
+    and how their thickness scales with $\nu$. Compare with the multi-stream
+    sheet density at the same $D$.
+
+## The 3D laboratory
+
+11. **One loop in 3D.** $64^3$, order 4, $D$ chosen so that
+    $D\,\sigma_\Psi/R \approx 0.3$. Compare measured and one-loop spectra;
+    estimate $k_{\rm NL}$ where $D^4 P_{22} = D^2 P_0$ and compare with the
+    scale where the two curves separate.
+
+12. **Dimension dependence.** Compare $P_{13}/P_0$ in 2D and 3D for the
+    same $P_0(k)$ shape. Which is more negative, and why does the dimension
+    enter through $\sigma_v^2$?

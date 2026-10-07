@@ -1,0 +1,149 @@
+---
+title: "Lagrangian perturbation theory to fourth order"
+---
+
+## Beyond Zel'dovich
+
+The Zel'dovich approximation @eq-za ignores the right-hand side of the
+equation of motion @eq-eom-D beyond linear order: fluid elements are never
+accelerated by the structure they form. **Lagrangian perturbation theory**
+(LPT) fixes this order by order with the ansatz
+
+$$
+\boldsymbol\Psi(\mathbf q, D) = \sum_{n\ge1} D^n\,\boldsymbol\Psi^{(n)}(\mathbf q),
+$$ {#eq-lpt-series}
+
+where $\boldsymbol\Psi^{(1)} = -\nabla\varphi$ is the Zel'dovich term. The
+$D^n$ time dependence is exact in an Einstein–de Sitter universe and an
+excellent approximation otherwise (the exact $\Lambda$CDM growth functions
+differ from $D^n$ by at most a few per cent, which is why the laboratory uses
+the EdS form; DISCO-DJ and similar codes offer both).
+
+## The equations in Lagrangian form
+
+Take the divergence and the curl of @eq-eom-D in Eulerian coordinates and
+transform to $\mathbf q$ using $\partial/\partial x_j = J^{-1} C_{ji}\,\partial/\partial q_i$
+with the cofactor matrix $C$ of $\partial\mathbf x/\partial\mathbf q$. With the
+shorthand $M_{ab} = \partial_b\Psi_a$ and the operator
+$\mathcal R = \partial_D^2 + \tfrac{3}{2D}\partial_D$, the two equations
+are
+
+$$
+C_{ji}\,\partial_i(\mathcal R\Psi_j) = -\frac{3}{2D^2}\,(1 - J)
+\qquad\text{(longitudinal: Poisson)}
+$$ {#eq-lpt-long}
+
+$$
+\varepsilon_{ijk}\,\dot x_{l,j}\,x_{l,k} = 0
+\qquad\text{(transverse: zero vorticity, Cauchy invariants)}
+$$ {#eq-lpt-trans}
+
+Because $\mathcal R(D^n) = n(n+\tfrac12)D^{n-2}$ and the right-hand side of
+@eq-lpt-long is a polynomial in the $M^{(n)}$, collecting powers of $D$
+gives a closed recursion. For order $n \ge 2$ (Rampf & Hahn 2021):
+
+$$
+\nabla\cdot\boldsymbol\Psi^{(n)} = \sum_{a+b=n} c_2(n;a,b)\,\mu_2\!\big(M^{(a)},M^{(b)}\big)
++ \sum_{a+b+c=n} c_3(n;a,b,c)\,\mu_3\!\big(M^{(a)},M^{(b)},M^{(c)}\big),
+$$ {#eq-lpt-rec-long}
+
+$$
+\nabla\times\boldsymbol\Psi^{(n)} = -\frac1n \sum_{m=1}^{n-1} m\;
+\varepsilon_{ijk}\,M^{(m)}_{lj}\,M^{(n-m)}_{lk},
+$$ {#eq-lpt-rec-trans}
+
+with the coefficients
+
+$$
+c_2 = \frac{\tfrac{3-n}{2} - a^2 - b^2}{(n+\tfrac32)(n-1)},\qquad
+c_3 = \frac{\tfrac{3-n}{2} - a^2 - b^2 - c^2}{(n+\tfrac32)(n-1)},
+$$
+
+sums over ordered tuples, and the polarized invariants
+$\mu_2(A,B) = \tfrac12[\operatorname{tr}A\operatorname{tr}B - \operatorname{tr}(AB)]$
+and $\mu_3(A,B,C)$, the symmetric trilinear form with $\mu_3(A,A,A) = \det A$.
+The divergence and curl determine $\boldsymbol\Psi^{(n)}$ uniquely in
+Fourier space: $\hat{\boldsymbol\Psi} = -i\mathbf k\,\hat S/k^2 + i\mathbf k\times\hat{\mathbf T}/k^2$.
+
+::: {.callout-note title="Sanity checks"}
+* $n = 2$: $c_2(2;1,1) = -3/7$ and $\mu_2(M^{(1)},M^{(1)}) =
+  \tfrac12[(\nabla^2\varphi)^2 - \varphi_{,ij}\varphi_{,ij}]$: the classic
+  2LPT result $\nabla\cdot\boldsymbol\Psi^{(2)} = -\tfrac37\sum_{i<j}(\varphi_{,ii}\varphi_{,jj} - \varphi_{,ij}^2)$.
+* $n = 3$: the coefficients $-1/3$ ($\mu_3$), $10/21$ ($\mu_2$ of orders 1 and
+  2) and $1/7$ (transverse) of Bouchet et al. (1995) are recovered.
+* The transverse part vanishes at orders 1 and 2 and is first non-zero at
+  third order: LPT displacements are *not* potential beyond 2LPT even though
+  the Eulerian velocity is.
+* The laboratory's Rust implementation is verified by inserting the truncated
+  series back into @eq-lpt-long and @eq-lpt-trans: the residuals scale as
+  $D^{n+1}$ and $D^{n}$ respectively for $n = 1,\dots,4$, in both 2D and 3D.
+:::
+
+### Two dimensions
+
+The laboratory's fast mode is two-dimensional. We treat it as a 3D universe
+with translational symmetry along $z$: all fields depend on $(x, y)$ only,
+all $z$-derivatives vanish, and the 3D equations above apply verbatim with
+$2\times2$ matrices ($\mu_3 \equiv 0$ and only the $z$-component of the curl
+survives). The growth factors and all coefficients stay the same, so the
+2D laboratory is quantitatively faithful to the 3D theory for planar
+structures.
+
+## From the series to a density
+
+Given $\boldsymbol\Psi^{(n)}$ on a Lagrangian grid we evaluate
+@eq-lpt-series at any $D$ (it is just a polynomial), move the grid points
+and ask what the Eulerian density is. There are two standard answers:
+
+**Particles.** Treat each grid point as a particle and deposit its mass on
+an Eulerian mesh (nearest-grid-point, cloud-in-cell, ...). Simple and
+dimension-agnostic, but noisy and biased by the assignment window.
+
+**The phase-space sheet** (Abel, Hahn & Kaehler 2012; Shandarin et al.
+2012). The grid points are *vertices* of the sheet; the sheet itself is the
+piecewise-linear interpolation between them. Split each Lagrangian cell into
+two triangles (2D) or six tetrahedra (3D); each simplex carries a fixed mass
+and its density is mass over current volume. The Eulerian density at a point
+is the *sum over all simplices covering it*: this is @eq-density-jacobian
+made discrete, multi-streaming included, with no free parameters and no
+shot noise. The laboratory renders the triangles on the GPU with additive
+blending, so you literally see the sheet fold.
+
+```{=html}
+<div class="hcc-widget" data-widget="lptorders"></div>
+<script type="module" src="../app/js/widgets.js"></script>
+```
+
+::: {.callout-tip title="Try it: order by order"}
+The panel shows the 2D sheet density for the same Gaussian field evolved to
+the same $D$ with 1LPT (Zel'dovich), 2LPT, 3LPT and 4LPT, together with the
+divergence source of each order. Second order deepens voids and sharpens
+filaments; third and fourth orders are small corrections *before* shell
+crossing and grow rapidly after it. The series converges up to the first
+shell crossing and (in a precise sense made rigorous by Zheligovsky & Frisch
+2014 and Rampf & Hahn 2021) not beyond, which is why we restrict the
+quantitative comparisons to $D < D_{\rm sc}$.
+:::
+
+## The smoothing scale
+
+Every realization in the laboratory starts from a Gaussian field smoothed
+with a filter $e^{-k^2R^2/2}$. Three different reasons make this
+unavoidable, and keeping them apart matters:
+
+1. **Resolution.** Products of fields on a grid alias power above the Nyquist
+   frequency back onto the resolved modes; a cutoff well below Nyquist (or
+   zero-padding) keeps the recursion clean.
+2. **Convergence.** Shell crossing happens first on the smallest scales. The
+   larger the small-scale power, the earlier $D_{\rm sc}$ and the smaller the
+   window in which perturbation theory is valid at all.
+3. **Physics.** On small scales cold dark matter is genuinely multi-stream
+   and *no* fluid description applies. The effective field theory of
+   large-scale structure ([Chapter 7](07-mode-coupling.qmd)) takes the
+   dependence on the cutoff seriously and absorbs it into measurable
+   parameters.
+
+The smoothing scale is a slider in the laboratory precisely so that you can
+watch all three effects. The dimensionless combination that controls
+everything is the rms displacement over the smoothing length,
+$D\,\sigma_\Psi / R$.

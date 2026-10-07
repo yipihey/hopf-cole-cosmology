@@ -1,0 +1,114 @@
+---
+title: "One solution, two spaces: kernels and multipliers"
+---
+
+The Hopf–Cole solution gives us the exact Burgers evolution written either
+as a Fourier multiplier acting on $\hat\psi$ or as a Gaussian kernel acting
+on $\psi$. In this chapter we use that freedom to look at the same dynamics
+from both sides and learn what each side makes visible.
+
+## Where did the mode coupling go?
+
+In the variable $u$ the Fourier modes are coupled by the convolution
+@eq-burgers-conv. In the variable $\psi$ they are not. The coupling has not
+vanished; it has been relocated into the nonlinear maps
+
+$$
+\psi_0 = \exp\left(-\frac{1}{2\nu}\int^x u_0\right), \qquad
+u = -2\nu\,\partial_x \ln\psi .
+$$
+
+An exponential of a single Fourier mode contains *all* harmonics:
+$e^{a\cos kx} = I_0(a) + 2\sum_{n\ge 1} I_n(a)\cos(nkx)$ with modified Bessel
+functions $I_n$. The logarithm undoes this. Between the two, the heat
+equation damps the harmonics differently (the $n$-th one by
+$e^{-\nu n^2 k^2 t}$), and that is the entire nonlinear dynamics. For the
+initial condition $u_0 = \sin x$ this gives Cole's famous exact series,
+
+$$
+u(x,t) = 2\nu \,\frac{\sum_{n\ge1} n\,I_n\!\left(\tfrac{1}{2\nu}\right) e^{-\nu n^2 t}\sin nx}
+{I_0\!\left(\tfrac{1}{2\nu}\right) + 2\sum_{n\ge1} I_n\!\left(\tfrac{1}{2\nu}\right) e^{-\nu n^2 t}\cos nx},
+$$ {#eq-cole-series}
+
+which is also a nice numerical test.
+
+```{=html}
+<div class="hcc-widget" data-widget="modes1d"></div>
+<script type="module" src="../app/js/widgets.js"></script>
+```
+
+::: {.callout-tip title="Try it: the Fourier cascade"}
+Start with a single sine mode. The spectrum $|\hat u_k|$ fills in at
+$2k, 3k, \ldots$ as the wave steepens: energy flows to small scales, the
+hallmark of mode coupling. Near the breaking time the spectrum approaches
+the $|\hat u_k| \propto k^{-1}$ law of a sawtooth ($P(k) \propto k^{-2}$),
+the Burgers analogue of a turbulence spectrum. Viscosity then cuts it off
+at $k \sim \Delta u/\nu$. Compare the exact harmonics with the spectrum of the
+*linear* solution: in the linear solution nothing ever appears at $2k$.
+:::
+
+## Local versus global
+
+The two representations are complementary in the sense of the uncertainty
+principle:
+
+| | Fourier multiplier $e^{-\nu k^2 t}$ | Real-space kernel $G_t(x)$ |
+|---|---|---|
+| acts | pointwise in $k$ | by averaging over $|x-y| \lesssim \sqrt{\nu t}$ |
+| is | global in $x$ | global in $k$ (a Gaussian has all wavenumbers) |
+| makes obvious | decay rates, conserved quantities, diagonal structure | locality, positivity, causality of information flow |
+| nonlinearity sits in | the exponential/log, which couples *all* $k$ | the exponential/log, which is *local* in $x$ |
+| cost on a grid | $O(N\log N)$ | $O(N\,w)$ with window $w \sim \sqrt{\nu t}/\Delta x$ |
+| failure mode | dynamic range of $\psi$ | none; log-sum-exp is stable as $\nu\to 0$ |
+
+The last row is worth dwelling on. The Fourier method needs $\psi$ itself,
+and $\psi$ overflows the floating-point format when $\Delta\Phi/2\nu$
+exceeds a few hundred (double precision) or a few tens (single precision);
+long before that, roundoff destroys the small values of $\psi$ that encode
+the solution in low-density regions. The kernel method only ever needs
+*differences* of $\ln\psi$,
+
+$$
+\ln\psi(x,t) = \operatorname{LSE}_y\!\left[\ln\psi_0(y) - \frac{(x-y)^2}{4\nu t}\right]
++ \text{const},
+\qquad \operatorname{LSE}_y[a_y] \equiv \ln\sum_y e^{a_y} = a_{\max} + \ln\sum_y e^{a_y - a_{\max}},
+$$ {#eq-lse}
+
+and as $\nu \to 0$ the log-sum-exp becomes a maximum: @eq-lse turns into the
+Hopf–Lax minimum @eq-hopf-lax. In the language of tropical (min-plus)
+algebra, the heat kernel convolution becomes a min-plus convolution with the
+parabola $(x-y)^2/2t$, and the Fourier transform has no analogue at all.
+Here the real-space view is not just convenient but *necessary*.
+
+## The inviscid limit as geometry
+
+@eq-hopf-lax has a beautiful geometric reading. For each $y$ draw the
+parabola $p_y(x) = \Phi_0(y) + (x-y)^2/2t$. The solution $\Phi(x,t)$ is their
+**lower envelope**. Equivalently, slide a parabola of curvature $1/t$ down
+from above onto the graph of $-\Phi_0$ ... it touches at $y_\star(x)$. Before
+$t_\star$ the parabola is "sharper" than any feature of $\Phi_0$ and touches
+at a single point which moves continuously with $x$. At later times the
+parabola is blunt enough to bridge a valley; the touching point then jumps,
+$u$ is discontinuous, and the matter that started between the two touching
+points has been swept into the shock.
+
+```{=html}
+<div class="hcc-widget" data-widget="hopflax1d"></div>
+<script type="module" src="../app/js/widgets.js"></script>
+```
+
+::: {.callout-tip title="Try it"}
+Move $x$ along the axis and watch the parabola find its minimum over $y$.
+After the breaking time two minima compete; the position $x$ where they tie
+is the shock. The lower panel shows the inverse map $y_\star(x)$: it is
+monotonic before breaking and develops a jump afterwards. Its derivative
+$dy_\star/dx$ is the density $\rho/\bar\rho$, so the jump carries a finite
+mass in zero width: a shock, a pancake, a $\delta$-function in the density.
+:::
+
+Computing the lower envelope of $N$ parabolas is an $O(N)$ operation (the
+same algorithm computes Euclidean distance transforms in image processing),
+and it is separable in several dimensions. Everything we need to evolve a
+cosmological field in the adhesion model is therefore available in three
+equivalent, exact forms: a Fourier multiplier, a log-domain kernel, and a
+lower envelope of paraboloids.

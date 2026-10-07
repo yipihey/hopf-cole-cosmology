@@ -1,0 +1,123 @@
+---
+title: "Mode coupling, power spectra and the EFT of large-scale structure"
+---
+
+## Eulerian perturbation theory in a nutshell
+
+Expand the Eulerian density in powers of the linear field,
+$\delta = \sum_n D^n \delta^{(n)}$, and write each order as a convolution of
+linear fields with a **kernel**:
+
+$$
+\hat\delta^{(n)}(\mathbf k) = \int_{\mathbf k_1+\dots+\mathbf k_n = \mathbf k}
+F_n(\mathbf k_1,\dots,\mathbf k_n)\,\hat\delta_0(\mathbf k_1)\cdots\hat\delta_0(\mathbf k_n).
+$$ {#eq-spt}
+
+For gravity the kernels follow from the recursion of Goroff et al. (1986);
+the second-order one is
+
+$$
+F_2(\mathbf k_1,\mathbf k_2) = \frac57 + \frac12\,\frac{\mathbf k_1\cdot\mathbf k_2}{k_1k_2}\left(\frac{k_1}{k_2}+\frac{k_2}{k_1}\right)
++ \frac27\,\frac{(\mathbf k_1\cdot\mathbf k_2)^2}{k_1^2k_2^2},
+$$ {#eq-f2}
+
+or in real space $\delta^{(2)} = \tfrac57\delta_0^2 + \nabla\delta_0\cdot\nabla\varphi + \tfrac27\varphi_{,ij}\varphi_{,ij}$.
+For the Zel'dovich / Burgers dynamics of [Chapter 5](05-zeldovich.qmd) the
+kernels are simpler and factorize,
+
+$$
+F_n^{\rm ZA}(\mathbf k_1,\dots,\mathbf k_n) = \frac{1}{n!}\prod_{i=1}^n \frac{\mathbf k\cdot\mathbf k_i}{k_i^2},
+\qquad \mathbf k = \sum_i\mathbf k_i ,
+$$ {#eq-fza}
+
+which is just the Taylor expansion of the determinant @eq-density-hc. The
+difference $F_2 - F_2^{\rm ZA} = \tfrac{2}{7}\left[1 - \frac{(\mathbf k_1\cdot\mathbf k_2)^2}{k_1^2k_2^2}\right]$
+is the tidal coupling that 2LPT adds and Burgers' equation lacks.
+
+::: {.callout-tip title="Try it: two plane waves"}
+In the laboratory choose the *two plane waves* initial condition with wave
+vectors $\mathbf k_1$ and $\mathbf k_2$. The Fourier amplitude map of the
+evolved density shows new modes at $2\mathbf k_1$, $2\mathbf k_2$ and
+$\mathbf k_1 \pm \mathbf k_2$ growing like $D^2$ with amplitudes given by
+$F_2$; at third order you will find $3\mathbf k_1$, $2\mathbf k_1 \pm \mathbf k_2$
+and so on. Compare 1LPT (Zel'dovich kernels) with 2LPT and 4LPT, and both
+with the Hopf–Cole solution: Hopf–Cole reproduces *all* Zel'dovich harmonics
+at once because the exponential resums the series. Make the two waves
+parallel and the tidal term switches off, so that the gravitational and
+Zel'dovich harmonics agree.
+:::
+
+## The power spectrum at one loop
+
+Average over Gaussian initial phases with $\langle\hat\delta_0\hat\delta_0^*\rangle = P_0(k)$.
+To fourth order in $\delta_0$,
+
+$$
+P(k, D) = D^2 P_0(k) + D^4\big[P_{22}(k) + P_{13}(k)\big] + O(D^6),
+$$ {#eq-1loop}
+
+$$
+P_{22} = 2\!\int\!\frac{d^dq}{(2\pi)^d}\,F_2^2(\mathbf q, \mathbf k-\mathbf q)\,P_0(q)P_0(|\mathbf k-\mathbf q|),
+\qquad
+P_{13} = 6P_0(k)\!\int\!\frac{d^dq}{(2\pi)^d}\,F_3(\mathbf k,\mathbf q,-\mathbf q)\,P_0(q).
+$$
+
+$P_{22}$ is the power *generated* at $k$ by pairs of modes; $P_{13}$ is the
+loss of coherence of the original mode. The laboratory evaluates both
+integrals numerically for the actual input $P_0(k)$ (with its smoothing),
+in 2D or 3D, with gravitational or Zel'dovich kernels, and overlays them on
+the power spectrum *measured* from the evolved field. For the Zel'dovich
+kernels $P_{13}^{\rm ZA} = -k^2\sigma_v^2 P_0(k)$ with the velocity dispersion
+$\sigma_v^2 = \frac1d\int\frac{d^dq}{(2\pi)^d}\frac{P_0(q)}{q^2}$: the famous
+over-damping of the Zel'dovich power spectrum.
+
+## Sensitivity to the cutoff and the EFT counterterm
+
+Both loop integrals extend to $q \to \infty$. With the smoothing filter they
+are finite, but they *depend on the smoothing scale* $R$ (or cutoff
+$\Lambda \sim 1/R$). Change $R$ in the laboratory and the one-loop curve
+moves, while the true large-scale dynamics must not care about what we did
+to scales we cannot resolve. The resolution (Baumann et al. 2012; Carrasco,
+Hertzberg & Senatore 2012) is that the fluid equations for the smoothed
+field acquire an effective stress tensor from the unresolved small-scale
+modes, whose leading effect on the power spectrum is a **counterterm**
+
+$$
+P_{\rm EFT}(k) = P_{\rm 1\text{-}loop}(k) - 2 c_s^2(\Lambda)\,k^2 D^2 P_0(k).
+$$ {#eq-eft}
+
+The "speed of sound" $c_s^2$ runs with $\Lambda$ in exactly the way needed to
+cancel the cutoff dependence of $P_{13}$, and its finite part encodes real
+small-scale physics that must be fitted to simulations (or, here, to the
+higher-order sheet solution). The laboratory lets you fit $c_s^2$ by least
+squares over $k < k_{\max}$ and watch it change with $R$ and with the LPT
+order used as the "truth".
+
+## Phases, propagators and the cosmic web
+
+The power spectrum discards the phases, yet the phases carry the cosmic
+web: randomizing them while keeping $P(k)$ turns a web of filaments and
+voids into a featureless Gaussian field. Two diagnostics in the laboratory
+make the phase evolution visible.
+
+**Phase maps.** The map of $\arg\hat\delta(\mathbf k)$ of the evolved field
+compared with that of the linear field: on large scales the phases are
+inherited from the initial conditions, on small scales they decorrelate.
+
+**The cross-correlation coefficient** (closely related to the propagator of
+Crocce & Scoccimarro 2006)
+
+$$
+r(k) = \frac{P_{\rm lin\times NL}(k)}{\sqrt{P_{\rm lin}(k)\,P_{\rm NL}(k)}} ,
+$$ {#eq-rk}
+
+which drops from 1 at low $k$ to 0 where memory of the initial conditions is
+lost. For the Zel'dovich dynamics it is a Gaussian, $r(k) \simeq e^{-k^2\sigma_v^2 D^2/2}$,
+and for the adhesion model the viscosity adds further damping: compare the
+two directly by changing $\nu$.
+
+Everything in this chapter is a statement about the *same* field seen in the
+two spaces of [Chapter 4](04-two-spaces.qmd): the real-space picture shows
+walls, filaments and voids forming; the Fourier picture shows power flowing
+from the peak of $P_0$ to high $k$, phases scrambling, and the smoothing
+scale controlling how far the perturbative description can be trusted.

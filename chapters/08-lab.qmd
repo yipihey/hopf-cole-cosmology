@@ -1,0 +1,69 @@
+---
+title: "The interactive 2D/3D laboratory"
+---
+
+The laboratory is a standalone web application: all of the numerics (nLPT
+recursion, sheet rasterization, Hopf–Cole solver, power spectra, loop
+integrals) run in your browser in WebAssembly compiled from the Rust crate
+[`core/`](https://github.com/yipihey/hopf-cole-cosmology/tree/main/core),
+and the fields are rendered with WebGPU (with a Canvas2D fallback).
+
+<p><a class="btn btn-primary btn-lg" href="../app/index.html">Open the laboratory in a new page</a></p>
+
+```{=html}
+<iframe src="../app/index.html?embed=1" style="width:100%;height:900px;border:1px solid #8884;border-radius:6px;" title="Hopf–Cole cosmology lab"></iframe>
+```
+
+## Two modes
+
+**2D (fast).** Grids from $128^2$ to $512^2$, interactive at the frame rate
+of the sheet renderer. The 2D universe is the $z$-symmetric 3D universe of
+[Chapter 6](06-lpt.qmd), so all coefficients are the physical ones. Use it
+to build intuition: drag $D$, change the smoothing scale, switch orders and
+compare with Hopf–Cole.
+
+**3D (quantitative).** Grids from $32^3$ to $128^3$ with the full 4LPT
+recursion ($\mu_3$ terms and all three curl components), cloud-in-cell
+densities with window deconvolution, slices and a volume rendering. Here
+the measured power spectra have enough modes per bin to compare with the
+one-loop predictions quantitatively.
+
+## Controls
+
+| Group | Control | Meaning |
+|---|---|---|
+| Initial conditions | shape | power law $k^n$, BBKS or Eisenstein–Hu CDM-like shape; two plane waves; a single peak |
+| | smoothing $R$ | Gaussian filter $e^{-k^2R^2/2}$ on $\delta_0$ (box units) |
+| | $\sigma_0$ | rms of the smoothed $\delta_0$; with $\sigma_0 = 1$ the growth factor $D$ equals the rms linear density contrast |
+| | seed | random phases |
+| Dynamics | $D$ | growth factor used as time; $D_{\rm sc}$ (first shell crossing of the chosen order) is displayed |
+| | LPT order | 1 (Zel'dovich) to 4 |
+| | $\nu$ | adhesion viscosity for the Hopf–Cole solver, in box units$^2$ |
+| | Hopf–Cole method | Fourier multiplier (shows the dynamic-range failure) or log-domain kernel with 1–4× refinement |
+| Views | field | sheet density, CIC density, Hopf–Cole density, linear density, velocity potential, $\ln\psi$, Jacobian, LPT sources |
+| | Fourier | $\log|\hat\delta(\mathbf k)|$ and phase maps of the selected field, $\log|\hat\psi(\mathbf k)|$ |
+| Statistics | $P(k)$ | measured for sheet / CIC / Hopf–Cole / linear, with 1-loop SPT and ZA predictions |
+| | $r(k)$ | cross-correlation with the linear field |
+| | EFT fit | $c_s^2$ from $P_{\rm sheet} - P_{\rm 1\text{-}loop}$ for $k < k_{\max}$ |
+
+## Suggested experiments
+
+1. **Zel'dovich equals Hopf–Cole.** Order 1, small $\nu$ with the log-domain
+   method, $D < D_{\rm sc}$: the sheet and Hopf–Cole density panels agree to
+   the rasterization noise, and their power spectra coincide.
+2. **Shell crossing.** Push $D$ past $D_{\rm sc}$. The sheet folds (wireframe
+   view) and the density develops three-stream regions; the Hopf–Cole
+   solution instead forms thin shocks whose thickness scales with
+   $\sqrt{\nu D}$.
+3. **Higher orders.** Order 2 versus 1 at fixed $D$: filaments sharpen,
+   voids empty. Orders 3 and 4 change little before shell crossing; the
+   order-4 source map shows where the series is working hardest.
+4. **Mode coupling.** Two plane waves; watch the harmonics in the amplitude
+   map; make them parallel.
+5. **The loop and the cutoff.** Gaussian field, order 4, $D \sim 0.3$. The
+   measured $P(k)$ departs from linear theory at high $k$; the 1-loop curve
+   follows it up to some $k$; the EFT counterterm extends the agreement.
+   Now change $R$: the loop prediction and the fitted $c_s^2$ move together.
+6. **Phases.** Compare the phase maps of the linear and evolved fields and
+   the $r(k)$ curve at several $D$, for 4LPT and for Hopf–Cole at two values
+   of $\nu$.

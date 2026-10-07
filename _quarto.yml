@@ -1,0 +1,69 @@
+project:
+  type: book
+  output-dir: _site
+  # Copied verbatim into _site (standalone app, WASM pkg, JS, shaders, CSS).
+  resources:
+    - app/**
+
+book:
+  title: "Hopf–Cole Cosmology"
+  subtitle: "From Burgers' equation to the cosmic web, in your browser"
+  author: "Tom Abel"
+  date: today
+  site-url: https://yipihey.github.io/hopf-cole-cosmology/
+  repo-url: https://github.com/yipihey/hopf-cole-cosmology
+  repo-actions: [issue]
+  search: true
+  page-footer: "Hopf–Cole Cosmology · MIT License"
+  navbar:
+    right:
+      - text: "Interactive Lab"
+        href: app/index.html
+      - icon: github
+        href: https://github.com/yipihey/hopf-cole-cosmology
+        aria-label: GitHub
+  sidebar:
+    style: docked
+    tools:
+      - icon: joystick
+        text: "Interactive Lab"
+        href: app/index.html
+  chapters:
+    - index.qmd
+    - part: "Burgers, heat and Hopf–Cole"
+      chapters:
+        - chapters/01-burgers.qmd
+        - chapters/02-heat.qmd
+        - chapters/03-hopf-cole.qmd
+        - chapters/04-two-spaces.qmd
+    - part: "Cosmology"
+      chapters:
+        - chapters/05-zeldovich.qmd
+        - chapters/06-lpt.qmd
+        - chapters/07-mode-coupling.qmd
+    - part: "Laboratory"
+      chapters:
+        - chapters/08-lab.qmd
+        - chapters/09-exercises.qmd
+    - chapters/references.qmd
+
+bibliography: chapters/references.bib
+
+format:
+  html:
+    theme:
+      light: cosmo
+      dark: darkly
+    css:
+      - app/css/hcc.css
+    toc: true
+    number-sections: true
+    number-depth: 2
+    code-fold: true
+    html-math-method: katex
+    include-in-header: includes/head.html
+
+execute:
+  freeze: auto
+  echo: true
+  warning: false

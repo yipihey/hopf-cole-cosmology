@@ -1,0 +1,185 @@
+---
+title: "Burgers' equation: advection meets diffusion"
+jupyter: hcc
+---
+
+::: {.callout-note appearance="simple"}
+This chapter grew out of a lecture notebook on solving Burgers' equation
+with Fourier methods (it is preserved in [`notebooks/`](https://github.com/yipihey/hopf-cole-cosmology/tree/main/notebooks)).
+Everything here runs live in your browser; the interactive panels are powered
+by the same Rust code, compiled to WebAssembly, that drives the
+[2D/3D laboratory](08-lab.qmd).
+:::
+
+## Two familiar terms, one new equation
+
+The viscous **Burgers equation**
+
+$$
+u_t + u\,u_x = \nu\, u_{xx}
+$$ {#eq-burgers}
+
+is assembled from pieces we know well. The right-hand side is the term of
+the **heat equation** $u_t = \nu u_{xx}$: it damps short-wavelength
+structure. The left-hand side looks like the **linear advection equation**
+$u_t + c\,u_x = 0$, whose solution $u(x,t) = u_0(x - ct)$ simply slides the
+initial profile to the right at speed $c$. The twist is that in @eq-burgers
+the advection speed *is the field itself*. Where $u$ is large the profile
+moves fast, where it is small it lags behind. A smooth bump therefore
+steepens on its leading edge until it tries to become multi-valued. This is
+the simplest equation in which inertia, $(\mathbf u\cdot\nabla)\mathbf u$,
+competes with dissipation, and it is the canonical model for shock
+formation.
+
+### Characteristics and the time of breaking
+
+Set $\nu = 0$ for a moment. Along the curves $\dot x = u$ the solution is
+constant: $\frac{d}{dt}u(x(t),t) = u_t + u u_x = 0$. So every fluid element
+keeps its initial velocity and moves in a straight line,
+
+$$
+x(t) = x_0 + u_0(x_0)\,t, \qquad u(x(t), t) = u_0(x_0).
+$$ {#eq-char}
+
+The map $x_0 \mapsto x$ has derivative $1 + u_0'(x_0)\,t$. Where $u_0' < 0$
+(the leading edge of a bump) this derivative reaches zero at
+
+$$
+t_\star = \frac{-1}{\min_{x_0} u_0'(x_0)} .
+$$ {#eq-tstar}
+
+At $t_\star$ neighbouring characteristics cross, $u_x \to -\infty$, and the
+inviscid solution becomes multi-valued. Keep @eq-char and $t_\star$ in mind:
+in cosmology, @eq-char will be the Zel'dovich approximation and $t_\star$
+will be the moment of *shell crossing*.
+
+With $\nu > 0$ the diffusion term switches on exactly where gradients are
+large and prevents the overturning. The result is a thin shock of width
+$\sim \nu/\Delta u$ moving at the mean of the velocities on either side.
+
+### A pseudo-spectral solver
+
+On a periodic domain we can compute derivatives exactly for every resolved
+mode: $\widehat{u_x} = i k\,\hat u$ and $\widehat{u_{xx}} = -k^2 \hat u$. The
+time integration below is the notebook's method: evaluate the right-hand side
+in real space with Fourier derivatives and hand it to an ODE integrator.
+
+```{python}
+#| code-fold: true
+#| fig-cap: "A sech pulse steepens, forms a shock and decays (ν = 0.001, pseudo-spectral RK integration). Left: waterfall of u(x,t). Right: the same data as an image."
+#| label: fig-burgers-waterfall
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+
+nu, L, N, Nt, Tfinal = 0.001, 2.0, 512, 100, 0.45
+dx = L / N
+x = np.arange(-L/2, L/2, dx)
+kappa = 2*np.pi*np.fft.fftfreq(N, d=dx)
+u0 = 1/np.cosh(x/(L/20))
+t = np.linspace(0, Tfinal, Nt)
+
+def rhs_burgers(t, u, kappa, nu):
+    uhat = np.fft.fft(u)
+    d_u  = np.fft.ifft(1j*kappa*uhat).real
+    dd_u = np.fft.ifft(-kappa**2*uhat).real
+    return -u*d_u + nu*dd_u
+
+sol = solve_ivp(rhs_burgers, (t[0], t[-1]), u0, args=(kappa, nu), t_eval=t, rtol=1e-8)
+u = sol.y.T
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.2))
+for j in range(0, Nt, 5):
+    ax1.plot(x, u[j] + 0.012*j, color=plt.cm.viridis(j/Nt), lw=1)
+ax1.set_xlabel("x"); ax1.set_ylabel("u (offset by time)"); ax1.set_title("steepening and shock formation")
+im = ax2.imshow(u, origin="lower", aspect="auto", extent=[-L/2, L/2, 0, Tfinal], cmap="magma")
+ax2.set_xlabel("x"); ax2.set_ylabel("t"); fig.colorbar(im, ax=ax2, label="u")
+plt.tight_layout()
+```
+
+::: {.callout-tip title="Try it"}
+The panel below integrates @eq-burgers live. Drag the time slider past the
+breaking time $t_\star$ (marked) and watch the leading edge. Lower $\nu$ to
+make the shock thinner; the dashed curve is the *exact* solution that we will
+construct in [Chapter 3](03-hopf-cole.qmd). Toggle "characteristics" to see
+the multi-valued inviscid solution @eq-char that the shock replaces.
+:::
+
+```{=html}
+<div class="hcc-widget" data-widget="burgers1d"></div>
+<script type="module" src="../app/js/widgets.js"></script>
+```
+
+## Conservation form and what gets conserved
+
+Burgers' equation can be written as a conservation law,
+
+$$
+u_t + \partial_x\!\left(\tfrac12 u^2 - \nu u_x\right) = 0,
+$$
+
+so the "momentum" $\int u\,dx$ over a periodic box is exactly conserved for
+any $\nu$, while the "energy" $\int \tfrac12 u^2\,dx$ decays at the rate
+$\nu\int u_x^2\,dx$, which is dominated by the shocks. This is the famous
+*anomalous dissipation* of Burgers turbulence: as $\nu \to 0$ the energy
+dissipation rate does **not** vanish, because $u_x^2$ inside the shock grows
+like $1/\nu^2$ over a width $\propto \nu$.
+
+### Carrying a density along
+
+@eq-burgers is the correct momentum equation of a pressureless fluid in the
+absence of external forces. To describe matter we also need to transport a
+density with the flow. The continuity equation
+
+$$
+\rho_t + \partial_x(\rho u) = 0
+$$ {#eq-continuity}
+
+does this. Starting from uniform $\rho = 1$, the density is compressed in
+front of the pulse where $u_x < 0$ and rarefied behind it. When the shock
+forms, matter piles up into a thin, dense sheet. In three dimensions these
+sheets are Zel'dovich's **pancakes**, the first structures to form in a
+universe of cold collisionless matter. We return to this in
+[Chapter 5](05-zeldovich.qmd).
+
+```{python}
+#| code-fold: true
+#| fig-cap: "Velocity (left) and density (right, log scale) for a sech pulse with ν = 0.009, integrating the momentum and continuity equations together. Matter piles up where characteristics converge."
+#| label: fig-burgers-density
+nu = 0.009
+rho0 = np.ones_like(x)
+U0 = np.concatenate((rho0, u0))
+
+def rhs_system(t, U, kappa, nu):
+    rho, u = U[:N], U[N:]
+    uhat = np.fft.fft(u)
+    d_u  = np.fft.ifft(1j*kappa*uhat).real
+    dd_u = np.fft.ifft(-kappa**2*uhat).real
+    d_urho = np.fft.ifft(1j*kappa*np.fft.fft(u*rho)).real
+    return np.concatenate((-d_urho, -u*d_u + nu*dd_u))
+
+sol = solve_ivp(rhs_system, (t[0], t[-1]), U0, args=(kappa, nu), t_eval=t, rtol=1e-7)
+U = sol.y.T
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.2))
+im1 = ax1.imshow(U[:, N:], origin="lower", aspect="auto", extent=[-L/2, L/2, 0, Tfinal], cmap="magma")
+ax1.set_title("u(x,t)"); ax1.set_xlabel("x"); ax1.set_ylabel("t"); fig.colorbar(im1, ax=ax1)
+im2 = ax2.imshow(np.log10(U[:, :N]), origin="lower", aspect="auto", extent=[-L/2, L/2, 0, Tfinal], cmap="cividis")
+ax2.set_title(r"$\log_{10}\rho(x,t)$"); ax2.set_xlabel("x"); fig.colorbar(im2, ax=ax2)
+plt.tight_layout()
+```
+
+## Where we are going
+
+We have a nonlinear, shock-forming equation and a workable numerical method.
+Two questions drive the rest of these notes:
+
+1. The heat equation can be solved *exactly* with one Fourier transform
+   (next chapter). Burgers' equation differs only by the term $u u_x$. Is
+   there any sense in which it is also "secretly linear"? Yes: the
+   **Hopf–Cole transform** ([Chapter 3](03-hopf-cole.qmd)).
+2. Equation @eq-char says fluid elements move ballistically. In an expanding
+   universe, cold dark matter does almost exactly this when the growth factor
+   is used as the time variable. Burgers' equation is therefore the
+   **adhesion model** of cosmic structure formation, and its exact Hopf–Cole
+   solution gives us an analytic handle on the cosmic web
+   ([Chapters 5–7](05-zeldovich.qmd)).
