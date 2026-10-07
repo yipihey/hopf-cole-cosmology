@@ -120,6 +120,20 @@ impl CosmoSim {
         let m = if method == 0 { HcMethod::Spectral { max_exp } } else { HcMethod::RealSpace { refine: method as usize } };
         self.hc = Some(self.inner.hopf_cole(d, nu, m));
     }
+    /// Legendre-transform / Hopf–Cole inversion of the nLPT map (see Cosmo::hopf_cole_lpt).
+    /// Stores the result in the same slot as `hopf_cole`; returns rms|Ψ_T|/rms|Ψ_L|.
+    pub fn hopf_cole_lpt(&mut self, d: f64, order: usize, nu: f64, method: u32, max_exp: f64, transverse: bool) -> f64 {
+        if !self.ok_order(1) { return f64::NAN; }
+        let m = if method == 0 { HcMethod::Spectral { max_exp } } else { HcMethod::RealSpace { refine: method as usize } };
+        let (r, frac) = self.inner.hopf_cole_lpt(d, order, nu, m, transverse);
+        self.hc = Some(r);
+        frac
+    }
+    /// Effective potential ϕ_eff of the nLPT longitudinal displacement at D (Ψ_L = -D∇ϕ_eff).
+    pub fn lpt_potential(&mut self, d: f64, order: usize) -> Vec<f32> {
+        if !self.ok_order(1) { return vec![]; }
+        self.inner.lpt_potential(d, order).0.iter().map(|&v| v as f32).collect()
+    }
     pub fn hc_delta(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.delta.clone()).unwrap_or_default() }
     pub fn hc_phi(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.phi_v.clone()).unwrap_or_default() }
     pub fn hc_velocity(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.velocity.clone()).unwrap_or_default() }

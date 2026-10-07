@@ -106,7 +106,6 @@ pub enum Growth {
 }
 
 /// Number of distinct orderings of a multiset given as a sorted tuple.
-fn orderings2(a: usize, b: usize) -> f64 { if a == b { 1.0 } else { 2.0 } }
 fn orderings3(a: usize, b: usize, c: usize) -> f64 {
     if a == b && b == c { 1.0 } else if a == b || b == c { 3.0 } else { 6.0 }
 }

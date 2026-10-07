@@ -46,6 +46,7 @@ shaders, so even $128^3$ follows the $D$ slider.
 | Views | field | sheet density (triangles in 2D, tetrahedra in 3D), CIC density, Hopf–Cole density, linear density, velocity potential, $\ln\psi$, Jacobian, LPT sources |
 | | GPU compute (3D) | runs positions, CIC deposit, Hopf–Cole and the FFTs on the GPU (WebGPU compute shaders) so that $128^3$ responds live to the $D$ slider |
 | | Fourier | $\log|\hat\delta(\mathbf k)|$ and phase maps of the selected field, $\log|\hat\psi(\mathbf k)|$ |
+| Legendre lab | source potential | Hopf–Cole run on the Zel'dovich potential, on the $n$LPT longitudinal potential (Legendre transform of the $n$LPT map, @sec-legendre), or with the first-order transverse correction; difference maps and spectral ratios against the sheet |
 | Statistics | $P(k)$ | measured for sheet / CIC / Hopf–Cole / linear, with 1-loop SPT and ZA predictions |
 | | $r(k)$ | cross-correlation with the linear field |
 | | EFT fit | $c_s^2$ from $P_{\rm sheet} - P_{\rm 1\text{-}loop}$ for $k < k_{\max}$ |
@@ -68,6 +69,10 @@ shaders, so even $128^3$ follows the $D$ slider.
    measured $P(k)$ departs from linear theory at high $k$; the 1-loop curve
    follows it up to some $k$; the EFT counterterm extends the agreement.
    Now change $R$: the loop prediction and the fitted $c_s^2$ move together.
-6. **Phases.** Compare the phase maps of the linear and evolved fields and
+6. **Legendre.** Open the Legendre lab, order 2, $D < D_{\rm sc}$: the
+   $n$LPT-potential density differs from the sheet only by the rasterization
+   noise (shrinking with $N$), while the Zel'dovich Hopf–Cole density differs by
+   the genuine 2LPT correction. At order 3 read off $\Psi_T/\Psi_L$.
+7. **Phases.** Compare the phase maps of the linear and evolved fields and
    the $r(k)$ curve at several $D$, for 4LPT and for Hopf–Cole at two values
    of $\nu$.

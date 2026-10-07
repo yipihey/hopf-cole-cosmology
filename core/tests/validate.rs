@@ -385,3 +385,43 @@ fn sheet_3d_tetrahedra() {
     let pc = c.power_spectrum(&dc, 10, true);
     for i in 0..3 { println!("k={:.1} P_sheet={:.3e} P_cic={:.3e}", ps.k[i], ps.p[i], pc.p[i]); assert!((ps.p[i] / pc.p[i] - 1.0).abs() < 0.25); }
 }
+
+#[test]
+fn hopf_cole_lpt_legendre() {
+    use hcc_core::hopfcole::HcMethod;
+    let mut c = Cosmo::new(2, 256, 1.0);
+    c.set_ic_gaussian(PkShape::PowerLaw { n: -1.0 }, 0.04, 9, 1.0);
+    c.build_lpt(3);
+    let d = 0.7 * c.shell_crossing(3);
+    let m = HcMethod::RealSpace { refine: 2 };
+    // order 1 reduces to the plain solver
+    let (h1, f1) = c.hopf_cole_lpt(d, 1, 1e-5, m, false);
+    let h0 = c.hopf_cole(d, 1e-5, m);
+    let mut e = 0.0; let mut nn = 0.0;
+    for i in 0..h0.delta.len() { e += (h1.delta[i] as f64 - h0.delta[i] as f64).powi(2); nn += (h0.delta[i] as f64).powi(2); }
+    println!("order-1 Legendre vs Zel'dovich HC rel diff {:.2e}, transverse frac {:.1e}", (e / nn).sqrt(), f1);
+    assert!((e / nn).sqrt() < 1e-5);
+    assert!(f1 < 1e-5);
+    // The sheet rasterizer has O(dx) noise, so compare *changes*: the 2LPT-1LPT
+    // difference of the Legendre densities must track the same difference of the
+    // sheet densities (correlation > 0.9, rms within 25%).
+    let sheet1 = c.sheet_density(d, 1, 256, 3);
+    for order in 2..=3 {
+        let sheet_n = c.sheet_density(d, order, 256, 3);
+        let (hn, frac) = c.hopf_cole_lpt(d, order, 1e-5, m, order == 3);
+        let mut sxy = 0.0; let mut sxx = 0.0; let mut syy = 0.0; let mut e = 0.0; let mut nn = 0.0;
+        for i in 0..sheet_n.len() {
+            let x = hn.delta[i] as f64 - h0.delta[i] as f64;          // HC(nLPT) - HC(1LPT)
+            let y = sheet_n[i] as f64 - sheet1[i] as f64;              // sheet(nLPT) - sheet(1LPT)
+            sxy += x * y; sxx += x * x; syy += y * y;
+            e += (hn.delta[i] as f64 - (sheet_n[i] as f64 - 1.0)).powi(2); nn += (sheet_n[i] as f64 - 1.0).powi(2);
+        }
+        let corr = sxy / (sxx * syy).sqrt();
+        let ratio = (sxx / syy).sqrt();
+        println!("order {order}: corr(ΔHC, Δsheet) = {corr:.3}, rms ratio {ratio:.3}, HC(nLPT) vs sheet {:.3e}, Ψ_T/Ψ_L = {:.2e}", (e / nn).sqrt(), frac);
+        assert!(corr > 0.9, "corr {corr}");
+        assert!((ratio - 1.0).abs() < 0.25, "ratio {ratio}");
+        assert!((e / nn).sqrt() < 0.12);
+        if order == 3 { assert!(frac > 0.0 && frac < 0.05); }
+    }
+}

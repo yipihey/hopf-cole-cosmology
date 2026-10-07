@@ -141,6 +141,88 @@ impl Cosmo {
     pub fn hopf_cole(&mut self, d: f64, nu: f64, method: hopfcole::HcMethod) -> hopfcole::HopfColeResult {
         hopfcole::hopf_cole_solve(&self.grid, &mut self.eng, &self.phi0, nu, d, method)
     }
+
+    /// Helmholtz decomposition of the nLPT displacement at D:
+    /// returns (ϕ_eff, Ψ_T) with Ψ_L = -D ∇ϕ_eff the longitudinal part and Ψ_T the
+    /// transverse remainder (interleaved).  For order 1, ϕ_eff = ϕ0 exactly.
+    pub fn lpt_potential(&mut self, d: f64, order: usize) -> (Vec<f64>, Vec<f32>) {
+        let dim = self.grid.dim;
+        let size = self.grid.size;
+        let lpt = self.lpt.as_ref().expect("call build_lpt first");
+        let mut comps: Vec<Vec<f32>> = Vec::new();
+        for a in 0..dim { comps.push(lpt.displacement_component(d, order, a)); }
+        // divergence in Fourier space, then ϕ_eff = -∇^{-2}(∇·Ψ)/D
+        let mut divhat = vec![C64::new(0.0, 0.0); size];
+        let mut hats: Vec<Vec<C64>> = Vec::new();
+        for a in 0..dim {
+            let h = self.eng.forward_real_f32(&comps[a]);
+            for idx in 0..size { let k = self.grid.kvec(idx); divhat[idx] += C64::new(0.0, k[a]) * h[idx]; }
+            hats.push(h);
+        }
+        let dd = if d.abs() < 1e-12 { 1.0 } else { d };
+        let phihat: Vec<C64> = (0..size).map(|idx| { let k2 = self.grid.k2(idx); if k2 == 0.0 { C64::new(0.0, 0.0) } else { divhat[idx] / k2 / dd } }).collect();
+        let phi_eff = self.eng.inverse_to_real(phihat.clone());
+        // transverse part: Ψ_T = Ψ - ∇S with Ŝ = -div̂/k²  (i.e. Ψ̂_L,a = -i k_a div̂ / k²)
+        let mut psi_t = vec![0.0f32; size * dim];
+        for a in 0..dim {
+            let lh: Vec<C64> = (0..size).map(|idx| { let k2 = self.grid.k2(idx); if k2 == 0.0 { C64::new(0.0, 0.0) } else { let k = self.grid.kvec(idx); C64::new(0.0, -k[a] / k2) * divhat[idx] } }).collect();
+            let l = self.eng.inverse_to_real(lh);
+            for idx in 0..size { psi_t[idx * dim + a] = comps[a][idx] - l[idx] as f32; }
+        }
+        (phi_eff, psi_t)
+    }
+
+    /// Hopf–Cole / Legendre-transform inversion of the nLPT map: the longitudinal
+    /// displacement potential of the chosen order replaces the Zel'dovich potential.
+    /// With `transverse` the inverse map is corrected to first order in Ψ_T,
+    /// q(x) ≈ q_L(x) - Ψ_T(q_L(x)), and the density recomputed from its Jacobian.
+    /// Returns the result and rms|Ψ_T| / rms|Ψ_L|.
+    pub fn hopf_cole_lpt(&mut self, d: f64, order: usize, nu: f64, method: hopfcole::HcMethod, transverse: bool) -> (hopfcole::HopfColeResult, f64) {
+        let dim = self.grid.dim;
+        let size = self.grid.size;
+        let (phi_eff, psi_t) = self.lpt_potential(d, order);
+        let mut r = hopfcole::hopf_cole_solve(&self.grid, &mut self.eng, &phi_eff, nu, d, method);
+        // transverse fraction
+        let mut st = 0.0; let mut sl = 0.0;
+        {
+            let lpt = self.lpt.as_ref().unwrap();
+            let comps: Vec<Vec<f32>> = (0..dim).map(|a| lpt.displacement_component(d, order, a)).collect();
+            for idx in 0..size { for a in 0..dim { let t = psi_t[idx * dim + a] as f64; let full = comps[a][idx] as f64; st += t * t; sl += (full - t) * (full - t); } }
+        }
+        let frac = if sl > 0.0 { (st / sl).sqrt() } else { 0.0 };
+        if transverse && frac > 0.0 {
+            // q_L(x) = x - D u(x);  q = q_L - Ψ_T(q_L) (periodic multilinear interpolation of Ψ_T)
+            let dx = self.grid.dx();
+            let n = self.grid.n;
+            let mut q = vec![0.0f64; size * dim];
+            let mut i0 = [0usize; 3];
+            let mut w1 = [0.0f64; 3];
+            for idx in 0..size {
+                let ijk = self.grid.unravel(idx);
+                let mut ql = [0.0f64; 3];
+                for a in 0..dim { ql[a] = ijk[a] as f64 * dx - d * r.velocity[idx * dim + a] as f64; }
+                for a in 0..dim { let x = ql[a] / dx; let f = x.floor(); w1[a] = x - f; i0[a] = (f as i64).rem_euclid(n as i64) as usize; }
+                let mut t = [0.0f64; 3];
+                for c in 0..(1usize << dim) {
+                    let mut w = 1.0; let mut jdx = 0usize;
+                    for a in 0..dim { let bit = (c >> a) & 1; let ia = (i0[a] + bit) % n; w *= if bit == 1 { w1[a] } else { 1.0 - w1[a] }; jdx = jdx * n + ia; }
+                    for a in 0..dim { t[a] += w * psi_t[jdx * dim + a] as f64; }
+                }
+                for a in 0..dim { q[idx * dim + a] = ql[a] - t[a]; }
+            }
+            // Jacobian det(∂q/∂x) by 4th-order FD of the displacement (q - x is periodic)
+            let mut disp: Vec<Vec<f64>> = vec![vec![0.0; size]; dim];
+            for idx in 0..size { let ijk = self.grid.unravel(idx); for a in 0..dim { disp[a][idx] = q[idx * dim + a] - ijk[a] as f64 * dx; } }
+            let mut grads: Vec<Vec<f64>> = Vec::new();
+            for a in 0..dim { for b in 0..dim { grads.push(hopfcole::fd_derivative(&self.grid, &disp[a], b)); } }
+            let mut mt = vec![0.0; dim * dim];
+            for idx in 0..size {
+                for c in 0..dim * dim { mt[c] = grads[c][idx]; }
+                r.delta[idx] = (lpt::det_i_plus(&mt, dim) - 1.0) as f32;
+            }
+        }
+        (r, frac)
+    }
     pub fn power_spectrum(&mut self, f: &[f32], nbins: usize, deconvolve_cic: bool) -> Spectrum {
         let fh = self.eng.forward_real_f32(f);
         if deconvolve_cic {

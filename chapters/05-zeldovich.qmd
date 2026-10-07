@@ -143,6 +143,40 @@ which the fold has become a $\delta$-function. Increase $D$ past
 $D_{\rm sc}$ to see pancakes form; then raise $\nu$ to see them thicken.
 :::
 
+## Hopf–Cole is a Legendre transform {#sec-legendre}
+
+Nothing in @eq-adhesion-hc used the fact that the velocity obeys Burgers'
+equation; what it used is that the Zel'dovich map is a *gradient map*,
+$\mathbf x = \nabla_q\chi$ with $\chi = \tfrac12 q^2 - D\varphi(\mathbf q)$. For a
+gradient map with convex $\chi$ (one stream) the inverse map is the gradient
+of the Legendre transform $\chi^*(\mathbf x) = \max_{\mathbf q}[\mathbf q\cdot\mathbf x - \chi(\mathbf q)]$,
+and $1 + \delta = \det\nabla\nabla\chi^*$. Writing it out,
+
+$$
+\chi^*(\mathbf x) = \tfrac12 x^2 - \min_{\mathbf q}\Big[S(\mathbf q) + \tfrac12|\mathbf x-\mathbf q|^2\Big],
+\qquad S(\mathbf q) = -D\varphi(\mathbf q),
+$$ {#eq-legendre}
+
+which is the Hopf–Lax formula @eq-hopf-lax with $t = 1$ and the displacement
+potential $S$ as the initial potential; the heat kernel at finite $\nu$ is its
+smooth version, and Burgers' equation in $D$ is just the statement that $S$ is
+linear in $D$. This suggests an obvious generalization: replace $S$ by the
+longitudinal displacement potential of $n$-th order Lagrangian perturbation
+theory ([Chapter 6](06-lpt.qmd)), $S_D = -D\varphi - \tfrac37 D^2\varphi^{(2)} - \dots$,
+and run the same machinery. Through second order the displacement is exactly
+a gradient, so this returns the *exact* 2LPT Eulerian density before shell
+crossing, on the Eulerian grid and without particles. At third and fourth
+order the small transverse part $\boldsymbol\Psi_T$ (about $10^{-3}$ of the
+longitudinal one) breaks the gradient structure; it can be restored to first
+order by correcting the inverse map, $\mathbf q(\mathbf x) \simeq \mathbf q_L(\mathbf x) - \boldsymbol\Psi_T(\mathbf q_L(\mathbf x))$.
+
+After shell crossing the two descriptions part ways deliberately: the sheet
+sums $1/|J|$ over all streams, which is the collisionless truth, while the
+minimum in @eq-legendre keeps one stream per point and collects the rest in
+thin walls, the adhesion model built on $n$LPT instead of Zel'dovich. The
+laboratory's "Legendre lab" compares the three densities (sheet, $n$LPT
+Legendre, Zel'dovich Hopf–Cole) and their power spectra side by side.
+
 ## Linear in $\psi$, nonlinear in $\delta$
 
 Pause on what @eq-adhesion-hc says. The field $\psi = e^{\varphi/2\nu}$
