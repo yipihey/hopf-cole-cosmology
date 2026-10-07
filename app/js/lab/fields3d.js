@@ -60,9 +60,9 @@ export class Fields3D {
     const S = this.app.S, app = this.app;
     const p = this.ps = this.panel('Slice');
     sel(p.head, { options: FIELDS, value: S.s1, onChange: (v) => { S.s1 = v; app.hashChanged(); app.runPanel(this, 1); } });
-    sel(p.opts, { label: 'axis ⟂', options: [[0, 'x'], [1, 'y'], [2, 'z']], value: S.sa, onChange: (v) => { S.sa = Number(v); app.hashChanged(); this.updateSlice(); } });
+    this.axSel = sel(p.opts, { label: 'axis ⟂', options: [[0, 'x'], [1, 'y'], [2, 'z']], value: S.sa, onChange: (v) => { S.sa = Number(v); app.hashChanged(); this.updateSlice(); if (app.legendre) app.legendre.sliceChanged(); } });
     this.idxSl = slider(p.opts, { label: 'index', min: 0, max: Math.max(1, app.S.n - 1), step: 1, value: Math.round(S.si * (S.n - 1)), format: (v) => String(Math.round(v)),
-      onInput: (v) => { S.si = v / (S.n - 1); app.hashChanged(); this.updateSlice(); } });
+      onInput: (v) => { S.si = v / (S.n - 1); app.hashChanged(); this.updateSlice(); if (app.legendre) app.legendre.sliceChanged(); } });
     sel(p.opts, { label: 'map', options: CMAPS, value: S.c2, onChange: (v) => { S.c2 = v; app.hashChanged(); this.updateSlice(); } });
     checkbox(p.opts, { label: 'log', value: S.l2, onChange: (v) => { S.l2 = v; app.hashChanged(); this.updateSlice(); } });
     const { cv, bar } = this.canvasBlock(p.root);
@@ -93,6 +93,8 @@ export class Fields3D {
     });
   }
 
+  /** Reflect S.sa / S.si changed elsewhere (Legendre lab). */
+  syncSlice() { const S = this.app.S; this.axSel.set(S.sa); this.idxSl.set(Math.round(S.si * (S.n - 1))); }
   markStale(b) { this.grid.querySelectorAll('.lab-panel').forEach((p) => p.classList.toggle('is-stale', b)); }
   fastUpdate() { return false; }
   redrawAll() { [0, 1, 2, 3].forEach((i) => this.app.runPanel(this, i)); }

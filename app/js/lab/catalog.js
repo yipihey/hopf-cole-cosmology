@@ -45,7 +45,9 @@ export const CATALOG = {
   hc: {
     label: 'Hopf–Cole density', cls: 'density', cmap: 'magma', log: true, unit: '1+δ',
     data: (e, P) => fmap(e.hc(P).delta, (v) => v + 1),
-    caption: () => '1+δ = det(I − D∇∇Φ_v) from the viscous-Burgers (adhesion) solution obtained with the Hopf–Cole transform. Before shell crossing it equals the Zel’dovich sheet; afterwards mass sticks into shocks of width ~√(νD).',
+    caption: (sub, P) => (P && P.hs && P.hs !== 'zel' && P.order > 1
+      ? `1+δ = det(I − ∇∇Φ) with Φ the Legendre transform (Hopf–Lax minimum, heat-kernel smoothed at finite ν) of the order-${P.order} ${P.hs === 'lptT' && P.order > 2 ? 'longitudinal + transverse-corrected ' : 'longitudinal '}Lagrangian map. Before shell crossing it is the nLPT density, particle-free on the Eulerian grid; afterwards it keeps one stream per point (adhesion) with shocks of width ~√(νD).`
+      : '1+δ = det(I − D∇∇Φ_v) from the viscous-Burgers (adhesion) solution obtained with the Hopf–Cole transform. Before shell crossing it equals the Zel’dovich sheet; afterwards mass sticks into shocks of width ~√(νD).'),
   },
   lin: {
     label: 'Linear density D δ0', cls: 'sym', cmap: 'rdbu', unit: 'δ_lin',

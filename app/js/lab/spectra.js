@@ -9,7 +9,7 @@ const SERIES = [
   ['lin', 'linear theory'],
   ['sheet', 'sheet (measured)'],
   ['cic', 'CIC (deconv.)'],
-  ['hc', 'Hopf–Cole (measured)'],
+  ['hc', 'Hopf–Cole (selected source)'],
   ['spt', '1-loop SPT'],
   ['za', '1-loop Zel’dovich'],
   ['eft', 'EFT fit'],
@@ -107,6 +107,7 @@ export class Spectra {
     const dim = e.dim, prim = dim === 2 ? 'sheet' : 'cic';
     const kmaxPlot = Math.sqrt(dim) * e.knyq, kminPlot = 0.8 * e.kf;
     const series = [];
+    const hcTag = P.hs === 'zel' || !P.hs ? '' : P.hs === 'lptT' && P.order > 2 ? ` (Legendre ${P.order}LPT+T)` : ` (Legendre ${P.order}LPT)`;
     const primLabel = dim === 2 ? 'sheet' : 'CIC (deconv.)';
 
     const lin = e.plinFine(P);
@@ -121,7 +122,7 @@ export class Spectra {
       series.push(dim === 2 ? { x: s.k, y: s.p, label: 'CIC (deconv.)', color: PALETTE[5], points: true, width: 1, radius: 2 }
         : { x: s.k, y: s.p, label: primLabel, color: PALETTE[0], points: true, width: 3, opacity: 0.6, radius: 3 });
     }
-    if (w.has('hc')) { const s = e.pk('hc', P); series.push({ x: s.k, y: s.p, label: 'Hopf–Cole', color: PALETTE[1], points: true, width: 1.2, radius: 2 }); }
+    if (w.has('hc')) { const s = e.pk('hc', P); series.push({ x: s.k, y: s.p, label: 'Hopf–Cole' + hcTag, color: PALETTE[1], points: true, width: 1.2, radius: 2 }); }
 
     let cs2 = null, fitNote = '';
     const spt = e.gaussian ? (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13') ? e.loop(P, 0) : null) : null;
@@ -164,7 +165,7 @@ export class Spectra {
     const rs = [];
     const rp = e.rk(prim, P), rh = e.rk('hc', P);
     rs.push({ x: rp.k, y: rp.r, label: `${dim === 2 ? 'sheet' : 'CIC'} × linear`, color: PALETTE[0], points: true, width: 2.4, opacity: 0.7, radius: 2.5 });
-    rs.push({ x: rh.k, y: rh.r, label: 'Hopf–Cole × linear', color: PALETTE[1], points: true, width: 1.2, radius: 2 });
+    rs.push({ x: rh.k, y: rh.r, label: 'Hopf–Cole' + hcTag + ' × linear', color: PALETTE[1], points: true, width: 1.2, radius: 2 });
     const sv2 = e.sigmaV2();
     if (sv2 !== null) {
       const ks = Float64Array.from({ length: 160 }, (_, i) => kminPlot * Math.pow(kmaxPlot / kminPlot, i / 159));

@@ -30,11 +30,11 @@ export function makeDefaults(mode = 2) {
     k1: [2, 0, 0], k2: [0, 3, 0], a1: 1, a2: 1, f1: 0, f2: 0,
     pa: 2, pw: 0.08,
     // dynamics
-    D: 0.3, order: 2, nu: 1e-4, me: 1, mx: 30, live: defaultLive(mode),
+    D: 0.3, order: 2, hs: 'zel', nu: 1e-4, me: 1, mx: 30, live: defaultLive(mode),
     gc: true,               // 3D: WebGPU compute path (when available)
     om: 1,                  // flat LCDM matter density (1 = EdS)
     // layout
-    vis: 'fs',              // visible sections: f = fields, s = spectra, e = explain
+    vis: 'fs',              // visible sections: f = fields, s = spectra, l = Legendre lab, e = explain
     // 2D field panels: [kind, sub, cmap, log]  ('' = default)
     slots: [['sheetgpu', 'both', '', ''], ['hc', '', '', ''], ['fabs', 'sheet', '', ''], ['fphase', 'sheet', '', '']],
     same: true, rmin: 0.1, rmax: 30,
@@ -73,6 +73,7 @@ const SCHEMA = [
   ['pw', 'pw', 'num', [0.005, 0.5]],
   ['D', 'D', 'num', [0, 5]],
   ['order', 'o', 'int', [1, 4]],
+  ['hs', 'hs', 'str', ['zel', 'lpt', 'lptT']],
   ['nu', 'nu', 'num', [1e-9, 1]],
   ['me', 'me', 'enum', METHODS],
   ['mx', 'mx', 'num', [1, 200]],

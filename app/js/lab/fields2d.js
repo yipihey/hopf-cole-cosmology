@@ -119,7 +119,7 @@ class Slot {
     try {
       let { kind, def, sub, cmap, log } = this.cfg;
       this.syncHidden(def);
-      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG.sheetcpu : def).caption(sub);
+      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG.sheetcpu : def).caption(sub, P);
       this.note.hidden = true;
       const n = eng.n;
       if (def.gpu && this.app.gpu) {
@@ -217,7 +217,7 @@ export class Fields2D {
     this.root = el('div', 'lab-fields2d', host);
     const bar = el('div', 'hcc-controls lab-fbar', this.root);
     this.sameCb = checkbox(bar, { label: 'same color range (all density panels)', value: app.S.same, onChange: (v) => { app.S.same = v; app.hashChanged(); this.redrawAll(); } });
-    const onR = () => { app.hashChanged(); this.redrawAll(); };
+    const onR = () => { app.hashChanged(); this.redrawAll(); if (app.legendre) app.legendre.redraw(); };
     this.rmin = slider(bar, { label: 'ρ min', min: 0.01, max: 1, value: app.S.rmin, log: true, onInput: (v) => { app.S.rmin = v; onR(); } });
     this.rmax = slider(bar, { label: 'ρ max', min: 3, max: 1000, value: app.S.rmax, log: true, onInput: (v) => { app.S.rmax = v; onR(); } });
     this.grid = el('div', 'hcc-grid2 lab-grid', this.root);
@@ -225,6 +225,8 @@ export class Fields2D {
     this.ro = new ResizeObserver(() => this.slots.forEach((s) => s.resizeBar()));
     this.ro.observe(this.grid);
   }
+  /** Reflect S.rmin / S.rmax / S.same changed elsewhere (Legendre lab). */
+  syncRange() { this.rmin.set(this.app.S.rmin); this.rmax.set(this.app.S.rmax); this.sameCb.set(this.app.S.same); }
   redrawAll() { this.slots.forEach((s, i) => this.app.runPanel(this, i)); }
   markStale(b, keepFast = false) { this.slots.forEach((s) => s.markStale(b && !(keepFast && s.isFast()))); }
   fastUpdate(P) { let any = false; for (const s of this.slots) any = s.fastUpdate(P) || any; return any; }

@@ -116,3 +116,13 @@ html { color-scheme: light dark; }
 .lab-nupresets .hcc-label { flex: 0 0 auto; font-size: 0.8125rem; }
 .lab-nupresets .hcc-btn { padding: 0.05rem 0.45rem; font-size: 0.78rem; }
 .lab-gbody .lab-dsc b { font-variant-numeric: tabular-nums; }
+
+/* Legendre lab */
+.lab-leg-intro { margin: 0.2rem 0 0.4rem; max-width: 62rem; line-height: 1.4; }
+.lab-leg-status { margin: 0.3rem 0; line-height: 1.4; }
+.lab-leg-status.lab-bad { color: var(--lab-bad); }
+.lab-leg-slice { display: contents; }
+.lab-leg-slice[hidden] { display: none; }
+.lab-leg-grid { grid-template-columns: repeat(auto-fit, minmax(max(14rem, 32%), 1fr)); }
+.lab-leg-grid2 { grid-template-columns: repeat(auto-fit, minmax(max(14rem, 49%), 1fr)); }
+.lab-legendre .hcc-readout.lab-bad .hcc-value { color: var(--lab-bad); }

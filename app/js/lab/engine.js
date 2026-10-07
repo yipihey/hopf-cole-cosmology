@@ -37,6 +37,7 @@ export class Engine {
     this.gTerms = null;           // {order, count} of the uploaded LPT terms
     this.gTermInfo = null;        // {orders, source} of the uploaded terms
     this.gFresh = {};             // field name -> memo key of the field currently resident in the GPU scratch buffers
+    this.gPhiKey = null;          // which potential the GPU phi0 buffer holds: 'zel' or 'lpt<order>|<D>' (see gpuPhi)
     this.ref = null;              // GPU-side reference spectra of delta0 (cross spectra, linear theory)
     this.gpuError = null; this.gpuFailed = false; this.gpuWanted = undefined;
     this.om = 1;                   // cosmology currently set on the sim (Omega_m)
@@ -86,7 +87,26 @@ export class Engine {
     const v = this.cache.get(this.gen + '|' + parts.join('|'));
     return v ? v.value : undefined;
   }
-  hcCached(P) { return this.peek(['hc', P.D, P.nu, P.me, P.mx]); }
+  hcCached(P) { return this.peek(this.hcKey(P)); }
+
+  // -- Hopf-Cole source potentials ---------------------------------------------------------------
+  //  'zel'  : Zel'dovich / Burgers (1LPT potential, hopf_cole)
+  //  'lpt'  : Legendre transform of the order-P.order longitudinal displacement (hopf_cole_lpt, transverse = false)
+  //  'lptT' : same with the first-order correction for the transverse part (orders >= 3)
+  /** Source selector for a field name: 'hc' follows P.hs, 'hcz' is always Zel'dovich, 'hcl' is the Legendre variant. */
+  hcSrcOf(which, P) {
+    if (which === 'hcz') return 'zel';
+    if (which === 'hcl') return P.hs === 'lptT' ? 'lptT' : 'lpt';
+    return P.hs || 'zel';
+  }
+  static isHc(which) { return which === 'hc' || which === 'hcz' || which === 'hcl'; }
+  /** Cache tag of a source: 'zel' | 'lpt<order>' | 'lptT<order>' (the T variant equals 'lpt' up to 2LPT, where Psi is a gradient). */
+  hcTag(P, src = P.hs || 'zel') {
+    if (src === 'zel') return 'zel';
+    const o = Math.max(1, P.order);
+    return (src === 'lptT' && o > 2 ? 'lptT' : 'lpt') + o;
+  }
+  hcKey(P, src) { return ['hc', P.D, P.nu, P.me, P.mx, this.hcTag(P, src)]; }
 
   static icSignature(P) {
     const a = [P.mode, P.n, P.ic, P.R];
@@ -138,7 +158,7 @@ export class Engine {
     if (!this.sim || Math.abs(om - this.om) < 1e-12) return false;
     this.sim.set_cosmology(om);
     this.om = om; this.builtOrder = 0;
-    this.gTerms = null; this.gTermInfo = null; this.gFresh = {};
+    this.gTerms = null; this.gTermInfo = null; this.gFresh = {}; this.gPhiKey = null;
     this.cache.clear(); this.cacheBytes = 0; this.gen++;    // also cancels in-flight GPU work (guarded by gen)
     return true;
   }
@@ -154,8 +174,8 @@ export class Engine {
   /** LPT growth bookkeeping: [{label, order, g}] with g = g_tau(D)/D^order for the terms up to `order`. */
   termGrowth(D, order) {
     if (!this.sim || this.builtOrder === 0) return [];
-    const labels = this.memo(['tlabels'], () => Array.from(this.sim.term_labels()));
-    const orders = this.memo(['torders'], () => Array.from(this.sim.term_orders()));
+    const labels = this.memo(['tlabels', this.builtOrder], () => Array.from(this.sim.term_labels()));
+    const orders = this.memo(['torders', this.builtOrder], () => Array.from(this.sim.term_orders()));
     const g = this.sim.term_growth(Math.max(D, 1e-6));
     const out = [], seen = {}, total = {};
     for (let t = 0; t < g.length; t++) total[orders[t]] = (total[orders[t]] || 0) + 1;
@@ -209,7 +229,7 @@ export class Engine {
   releaseGpu() {
     if (this.g) { try { this.g.destroy(); } catch (e) { console.warn('[engine] GPU destroy:', e); } }
     const had = !!this.g || !!this.ref;
-    this.g = null; this.gTerms = null; this.gTermInfo = null; this.ref = null; this.gFresh = {};
+    this.g = null; this.gTerms = null; this.gTermInfo = null; this.ref = null; this.gFresh = {}; this.gPhiKey = null;
     // GPU-derived cache entries and in-flight GPU work (guarded by `gen`) are stale now
     if (had) { this.cache.clear(); this.cacheBytes = 0; this.gen++; }
   }
@@ -238,7 +258,7 @@ export class Engine {
         this.g = await this.timeAsync('GPU init', async () => { const g = new GpuCosmo3D(this.gpuDev, this.n); await g.init(); return g; });
       }
       const g = this.g;
-      if (!g.hasPhi0) this.time('GPU phi0', () => g.setPhi0(this.sim.phi0()));
+      if (!g.hasPhi0) this.time('GPU phi0', () => { g.setPhi0(this.sim.phi0()); this.gPhiKey = 'zel'; });
       if (!this.gTerms || this.gTerms.order < this.builtOrder) {
         await this.timeAsync('GPU terms', async () => {
           const T = getTerms(this.sim, this.n);
@@ -287,15 +307,37 @@ export class Engine {
         if (gen !== this.gen) return;
         this.seed(key, rho);
         this.gFresh.cic = key.join('|');
-      } else if (which === 'hc' && P.me === 1) {
-        const key = ['hc', P.D, P.nu, P.me, P.mx];
+      } else if (Engine.isHc(which) && P.me === 1) {
+        const src = this.hcSrcOf(which, P), tag = this.hcTag(P, src);
+        if (tag.startsWith('lptT')) return;          // transverse-corrected Legendre inversion: WASM only
+        const key = this.hcKey(P, src);
         if (this.peek(key) !== undefined) return;
-        const delta = await this.timeAsync('Hopf-Cole (GPU)', async () => g.readField(g.hopfCole(P.nu, P.D).delta));
+        let range = 0;
+        const delta = await this.timeAsync('Hopf-Cole (GPU)', async () => {
+          this.gpuPhi(P, tag);
+          const d = await g.readField(g.hopfCole(P.nu, P.D).delta);
+          range = g.hcExponentRange(P.nu);
+          return d;
+        });
         if (gen !== this.gen) return;
-        this.seed(key, { delta, nuEff: P.nu, range: g.hcExponentRange(P.nu), floor: 1 / (this.n * this.n * 4 * Math.max(P.D, 1e-12)) });
-        this.gFresh.hc = key.join('|');
+        this.seed(key, { delta, nuEff: P.nu, range, floor: 1 / (this.n * this.n * 4 * Math.max(P.D, 1e-12)), ratio: NaN });
+        this.gFresh.hc = key.join('|');              // the single hc scratch buffer now holds this field
       }
     } catch (err) { if (gen === this.gen) this.gpuFailure(err); }
+  }
+
+  /**
+   * Make the GPU phi0 buffer hold the potential of the Hopf-Cole source `tag`: the 1LPT potential ('zel') or the
+   * order-n effective longitudinal potential phi_eff(D) of the nLPT map (Psi_L = -D grad phi_eff), computed by WASM
+   * and uploaded; the GPU Hopf-Cole then runs on it unchanged.  phi_eff depends on D, so it is re-uploaded per D.
+   */
+  gpuPhi(P, tag) {
+    const want = tag === 'zel' ? 'zel' : tag + '|' + P.D;
+    if (this.gPhiKey === want && this.g.hasPhi0) return;
+    this.ensureLpt(P.order);
+    const phi = tag === 'zel' ? this.sim.phi0() : this.sim.lpt_potential(P.D, P.order);
+    this.g.setPhi0(phi);
+    this.gPhiKey = want;
   }
 
   /**
@@ -314,7 +356,8 @@ export class Engine {
       // use the GPU-resident field when it is the one just computed (no CPU round trip), else upload the cached CPU copy
       const g = this.g, fkey = this.fieldKey(which, P).join('|');
       let buf, offset = 0;
-      if (this.gFresh[which] === fkey && (which === 'cic' || which === 'hc')) { buf = which === 'cic' ? g.buf('rho') : g.buf('hc-delta'); offset = which === 'cic' ? 1 : 0; }
+      const hcLike = Engine.isHc(which);
+      if ((which === 'cic' && this.gFresh.cic === fkey) || (hcLike && this.gFresh.hc === fkey)) { buf = which === 'cic' ? g.buf('rho') : g.buf('hc-delta'); offset = which === 'cic' ? 1 : 0; }
       else buf = g.uploadField(this.delta(which, P));
       const an = await this.timeAsync('FFT + spectra (GPU)', async () => g.analyze(buf, { nbins: this.nbins, maps: true, cross: true, offset }));
       if (gen !== this.gen) return;
@@ -371,16 +414,28 @@ export class Engine {
     if (this.ref) return this.memo(['lin', P.D], () => { const d0 = this.ref.d0, o = new Float32Array(d0.length); for (let i = 0; i < o.length; i++) o[i] = P.D * d0[i]; return o; });
     return this.memo(['lin', P.D], () => this.time('linear', () => this.sim.linear_delta(P.D)));
   }
-  hc(P) {
-    return this.memo(['hc', P.D, P.nu, P.me, P.mx], () => this.time('Hopf-Cole', () => {
+  /** Hopf-Cole solution for the source potential `src` (default: the selected one, P.hs). */
+  hc(P, src = P.hs || 'zel') {
+    const tag = this.hcTag(P, src);
+    return this.memo(this.hcKey(P, src), () => this.time(tag === 'zel' ? 'Hopf-Cole' : 'Hopf-Cole (Legendre)', () => {
       const s = this.sim;
-      s.hopf_cole(P.D, P.nu, P.me, P.mx);
-      const r = { delta: s.hc_delta(), nuEff: s.hc_nu_eff(), range: s.hc_exponent_range(), floor: s.hc_nu_floor() };
+      let ratio = 0;
+      if (tag === 'zel') s.hopf_cole(P.D, P.nu, P.me, P.mx);
+      else { this.ensureLpt(P.order); ratio = s.hopf_cole_lpt(P.D, P.order, P.nu, P.me, P.mx, tag.startsWith('lptT')); }
+      const r = { delta: s.hc_delta(), nuEff: s.hc_nu_eff(), range: s.hc_exponent_range(), floor: s.hc_nu_floor(), ratio };
       if (this.dim === 2) {
         r.phi = s.hc_phi(); r.lnpsi = s.hc_lnpsi(); r.psihat = s.hc_psihat_log(); r.vel = s.hc_velocity();
       }
       return r;
     }));
+  }
+  /** rms|Psi_T| / rms|Psi_L| of the order-P.order displacement at D (0 up to 2LPT); D-dependent, ν-independent. */
+  psiT(P) {
+    if (P.order <= 2) return 0;
+    return this.memo(['psit', P.D, P.order], () => {
+      this.ensureLpt(P.order);
+      return this.time('Psi_T/Psi_L', () => this.sim.hopf_cole_lpt(P.D, P.order, 1e-2, 0, 30, true));
+    });
   }
   jacobian(P) {
     return this.memo(['jac', P.D, P.order], () => this.time('Jacobian', () => this.sim.jacobian(P.D, P.order)));
@@ -403,14 +458,14 @@ export class Engine {
   fieldKey(which, P) {
     switch (which) {
       case 'sheet': case 'cic': return [which, P.D, P.order];
-      case 'hc': return [which, P.D, P.nu, P.me, P.mx];
+      case 'hc': case 'hcz': case 'hcl': return this.hcKey(P, this.hcSrcOf(which, P));
       default: return ['lin', P.D];
     }
   }
   /** Overdensity delta (mean 0) of the named field. */
   delta(which, P) {
     return this.memo(['delta', ...this.fieldKey(which, P)], () => {
-      if (which === 'hc') return this.hc(P).delta;
+      if (Engine.isHc(which)) return this.hc(P, this.hcSrcOf(which, P)).delta;
       if (which === 'lin') return this.linear(P);
       const rho = which === 'sheet' ? this.sheet(P) : this.cic(P);
       const o = new Float32Array(rho.length);

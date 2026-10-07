@@ -85,8 +85,13 @@ export function buildControls(app, host) {
     title: 'Flat ΛCDM matter density. 1 = Einstein–de Sitter (exact Dⁿ growth); otherwise the LPT growth functions are integrated numerically. Changing it rebuilds the LPT (the IC is kept).',
     onChange: (v) => app.setParam('om', Number(v), 'all') });
   C.cosmo = el('div', 'lab-dsc', gd, 'a(D) = –');
-  C.order = sel(gd, { label: 'LPT order', options: [[1, '1 (Zel’dovich)'], [2, '2 (2LPT)'], [3, '3 (3LPT)'], [4, '4 (4LPT)']], value: S.order, onChange: (v) => app.setParam('order', Number(v), 'all') });
+  C.order = sel(gd, { label: 'LPT order', options: [[1, '1 (Zel’dovich)'], [2, '2 (2LPT)'], [3, '3 (3LPT)'], [4, '4 (4LPT)']], value: S.order, onChange: (v) => { app.setParam('order', Number(v), 'all'); C.syncVisibility(); } });
   C.growth = el('p', 'lab-note-line', gd, 'LPT growth g_τ(D)/Dⁿ: –');
+  C.hs = sel(gd, { label: 'HC source ϕ', options: [['zel', 'Zel’dovich / Burgers (1LPT)'], ['lpt', 'nLPT longitudinal (Legendre transform)'], ['lptT', 'nLPT + transverse correction']], value: S.hs,
+    title: 'Hopf–Cole source potential. Zel’dovich: S = −Dϕ, the Burgers equation in D. nLPT longitudinal: S = the longitudinal displacement potential of the chosen LPT order; the Legendre transform of q²/2 + S(q) inverts the gradient Lagrangian map, giving the exact nLPT Eulerian density before shell crossing. + transverse: first-order correction for the small curl part Ψ_T of 3LPT/4LPT (WASM only in 3D).',
+    onChange: (v) => { app.setParam('hs', v, 'nu'); C.syncVisibility(); } });
+  C.hsNote = el('p', 'lab-note-line', gd);
+  C.hsNote.hidden = true;
   C.nu = slider(gd, { label: 'ν [L²]', min: 1e-6, max: 1e-2, value: S.nu, log: true, onInput: set('nu', 'nu'), format: (v) => v.toExponential(1) });
   const presets = el('div', 'hcc-row lab-nupresets', gd);
   el('span', 'hcc-label', presets, 'ν presets');
@@ -117,6 +122,9 @@ export function buildControls(app, host) {
     C.sp.el.hidden = ic === 'g';
     C.mx.el.hidden = S.me !== 0;
     C.wave.forEach((w) => { w.comps[2].show(S.mode === 3); });
+    C.hsNote.hidden = S.hs === 'zel';
+    C.hsNote.textContent = S.hs === 'zel' ? '' : `Legendre inversion of the order-${S.order} map` + (S.hs === 'lptT' ? (S.order > 2 ? ' with the transverse correction (rms Ψ_T/Ψ_L in the Legendre lab)' : ' (Ψ is a pure gradient through 2LPT: no correction)') : '')
+      + (S.hs !== 'zel' && S.order === 1 ? ' = Zel’dovich' : '') + (S.mode === 3 && S.hs === 'lptT' && S.order > 2 ? '; WASM only in 3D, seconds per update' : S.mode === 3 && app.gpuCompute && S.gc ? '; the nLPT potential is computed by WASM and the solve runs on the GPU' : '') + '.';
     C.memWarn.hidden = !(S.mode === 3 && S.n >= 128);
     C.gc.el.hidden = !(S.mode === 3 && app.gpuCompute);
     C.gcNote.hidden = C.gc.el.hidden || !S.gc;
@@ -136,7 +144,7 @@ export function buildControls(app, host) {
       w.comps.forEach((c, j) => c.set(S[key][j]));
       w.amp.set(S['a' + (i + 1)]); w.ph.set(((S['f' + (i + 1)] % 360) + 360) % 360);
     });
-    C.D.set(S.D); C.om.set(S.om); C.order.set(S.order); C.nu.set(S.nu); C.me.set(S.me); C.mx.set(S.mx);
+    C.D.set(S.D); C.om.set(S.om); C.order.set(S.order); C.hs.set(S.hs); C.nu.set(S.nu); C.me.set(S.me); C.mx.set(S.mx);
     C.live.set(S.live);
     C.gc.set(S.gc && app.gpuCompute);
     C.syncVisibility();

@@ -23,6 +23,12 @@ const NOTES = [
       Lowering Ω_m below one (flat ΛCDM) changes only the time dependence: the growth functions of every LPT term, including the linear D(a), are integrated numerically from the exact equations instead of being the pure powers Dⁿ of Einstein–de Sitter, so the readout g_τ(D)/Dⁿ departs from the EdS constants (−3/7, …) as D grows; the Hopf–Cole solution depends on D only and is unchanged.`,
   },
   {
+    title: 'Legendre transform: Hopf–Cole for the exact nLPT density',
+    html: `The Hopf–Cole / Hopf–Lax construction inverts any <i>gradient</i> Lagrangian map: for x = q + ∇S(q), the inverse map is the gradient of the Legendre transform of q²/2 + S(q), i.e. Φ(x) = min_q [S(q) + |x−q|²/2] (and its heat-kernel smoothing at finite ν), and the Eulerian density is 1+δ = det(I − ∇∇Φ).
+      The Zel’dovich approximation is the case S = −Dϕ, where this is also the Burgers equation in D. Replacing S by the longitudinal displacement potential of nLPT gives the exact nLPT Eulerian density before shell crossing, particle-free and on the Eulerian grid; afterwards the Legendre transform keeps one stream per point (the “adhesion” selection) whereas the sheet sums all streams.
+      Through 2LPT the displacement is exactly a gradient; at 3LPT and 4LPT a small transverse part Ψ_T appears (rms ratio ∼10⁻³), which can be corrected to first order in the inverse map, q(x) ≈ q_L(x) − Ψ_T(q_L(x)). Switch on <i>Legendre lab</i> and choose the “HC source ϕ” under Dynamics to compare the Legendre density with the sheet and with the Zel’dovich Hopf–Cole density: the residual against the sheet before shell crossing is the sheet’s own rasterization noise, which shrinks with N.`,
+  },
+  {
     title: 'The Fourier method and its dynamic range',
     html: `The multiplier solution evaluates exp(−Φ/2ν) on the grid and then multiplies its transform by exp(−νk²D). For small ν the exponent range (Φmax − Φmin)/2ν is enormous (the readout “exponent range”), and double precision cannot hold e^{range}.
       The Fourier method therefore limits the range to max_exp by raising the effective viscosity ν_eff, which is why its result departs from the requested ν. The log-domain kernel (×1, ×2, ×4 refinement) evaluates the same heat-kernel convolution with log-sum-exp and remains accurate down to a grid floor of order Δx²/(4D), refined by the upsampling factor.`,
