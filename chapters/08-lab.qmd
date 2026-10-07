@@ -14,6 +14,18 @@ and the fields are rendered with WebGPU (with a Canvas2D fallback).
 <iframe src="../app/index.html?embed=1" style="width:100%;height:900px;border:1px solid #8884;border-radius:6px;" title="Hopf–Cole cosmology lab"></iframe>
 ```
 
+## Requirements and lite mode
+
+Everything runs in the browser; nothing is sent to a server. On a desktop
+GPU use the defaults. On a laptop with an integrated GPU (or with WebGPU
+disabled) the lab detects this and starts in **lite mode**: 2D at $128^2$,
+CPU rendering of the sheet density, GPU compute off, 3D limited to $64^3$.
+You can force it with the *Performance* control or by opening
+`app/index.html?lite=1`; `?nogpu=1` disables WebGPU altogether. If the lab
+ever stalls on a GPU, a banner offers both options, and the *Diagnostics*
+box at the bottom of the controls lists the adapter, its limits and the
+last error so that you can report them.
+
 ## Two modes
 
 **2D (fast).** Grids from $128^2$ to $512^2$, interactive at the frame rate

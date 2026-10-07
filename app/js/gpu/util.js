@@ -11,7 +11,10 @@ import { compileModule } from '../viz/gpu.js';
 export const GPU_USAGE = {
   STORAGE: 0x80 | 0x4 | 0x8,          // STORAGE | COPY_SRC | COPY_DST
 };
-export const STORAGE_RW = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+// Literal WebGPU constants: the GPUBufferUsage global does not exist in browsers
+// without WebGPU (e.g. Firefox on macOS/Linux), and referencing it at module load
+// would break the whole module graph.  STORAGE = 0x80, COPY_SRC = 0x4, COPY_DST = 0x8.
+export const STORAGE_RW = 0x80 | 0x4 | 0x8;
 
 export async function compile(device, code, label) { return compileModule(device, code, label); }
 

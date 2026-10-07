@@ -21,6 +21,7 @@ the browser with WebAssembly and drawn with WebGPU.
 <div class="hcc-cta">
 <a class="btn btn-primary btn-lg" href="chapters/01-burgers.qmd">Start reading</a>
 <a class="btn btn-outline-secondary btn-lg" href="app/index.html">Open the laboratory</a>
+<a class="btn btn-outline-secondary btn-lg" href="app/index.html?lite=1">Lite mode (laptops)</a>
 </div>
 
 ## What you will learn
@@ -40,9 +41,14 @@ the browser with WebAssembly and drawn with WebGPU.
 ## Requirements
 
 The interactive panels need a modern browser with WebAssembly. WebGPU
-(Chrome, Edge, Safari 26, Firefox 141+) gives the fastest rendering; without
-it the pages fall back to Canvas2D. The 3D mode at $128^3$ needs about
-1 GB of memory.
+(Chrome, Edge, Safari 26, Firefox 141+) gives the fastest rendering and, in
+3D, runs the whole pipeline in compute shaders; without it the pages fall
+back to Canvas2D and the WebAssembly solvers. On laptops with an integrated
+GPU the laboratory starts in a *lite* mode (smaller grids, CPU rendering,
+GPU compute off); you can also force it with
+[`app/index.html?lite=1`](app/index.html?lite=1) or disable WebGPU
+entirely with `?nogpu=1`. The full 3D mode at $128^3$ needs about 1 GB of
+GPU memory.
 
 The source, including the Rust numerical core and this text, is at
 [github.com/yipihey/hopf-cole-cosmology](https://github.com/yipihey/hopf-cole-cosmology).
