@@ -53,3 +53,9 @@
 .hcc-grid2, .hcc-grid3 { display: grid; gap: var(--hcc-gap); margin: var(--hcc-gap) 0; grid-template-columns: 1fr; }
 @media (min-width: 640px) { .hcc-grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hcc-grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 960px) { .hcc-grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* landing page call-to-action buttons and chapter widgets */
+.hcc-cta { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.25rem 0; }
+.hcc-widget { margin: 1rem 0 1.5rem; }
+.hcc-widget .hcc-controls { padding: 0.5rem 0.75rem; border: 1px solid var(--hcc-border); border-radius: var(--hcc-radius); background: var(--hcc-tint); }
+.hcc-widget .hcc-slider input[type="range"] { width: 11rem; }
