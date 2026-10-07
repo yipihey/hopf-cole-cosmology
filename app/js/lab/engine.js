@@ -125,6 +125,7 @@ export class Engine {
   positions(P) { return this.sim.positions(P.D, Math.min(P.order, this.builtOrder)); }
 
   sheet(P) {
+    if (this.dim !== 2) throw new Error('sheet density is only available in 2D');   // a Rust panic would poison the sim
     return this.memo(['sheet', P.D, P.order], () => this.time('sheet', () => this.sim.sheet_density(P.D, P.order, this.n, 2)));
   }
   cic(P) {
@@ -189,7 +190,9 @@ export class Engine {
   fmaps(which, P) {
     return this.memo(['fmap', ...this.fieldKey(which, P)], () => this.time('Fourier maps', () => {
       const d = this.delta(which, P);
-      return { amp: this.sim.fourier_amp(d), phase: this.sim.fourier_phase(d) };
+      const both = this.sim.fourier_maps(d); // one FFT for both maps
+      const nn = both.length / 2;
+      return { amp: both.slice(0, nn), phase: both.slice(nn) };
     }));
   }
 
@@ -209,12 +212,9 @@ export class Engine {
       const dw = this.delta(which, P), dl = this.linear(P);
       const c = unpackSpectrum(this.sim.cross_spectrum(dw, dl, this.nbins));
       const pw = this.pk(which, P, false), pl = this.pk('lin', P, false);
-      const r = new Float64Array(c.k.length), g = new Float64Array(c.k.length);
-      for (let i = 0; i < r.length; i++) {
-        r[i] = c.p[i] / Math.sqrt(Math.max(1e-300, pw.p[i] * pl.p[i]));
-        g[i] = c.p[i] / Math.max(1e-300, pl.p[i]);      // propagator G = P_{f,lin} / P_lin
-      }
-      return { k: c.k, r, g };
+      const r = new Float64Array(c.k.length);
+      for (let i = 0; i < r.length; i++) r[i] = c.p[i] / Math.sqrt(Math.max(1e-300, pw.p[i] * pl.p[i]));
+      return { k: c.k, r };
     }));
   }
   /** Smooth linear theory D^2 P0(k) on a fine k grid. */

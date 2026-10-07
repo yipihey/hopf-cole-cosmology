@@ -93,7 +93,7 @@ export const CATALOG = {
   },
   psihat: {
     label: '|ψ̂(k)|', cls: 'psihat', cmap: 'viridis', unit: 'log₁₀|ψ̂|/max', fourier: true,
-    data: (e, P) => fftshift2D(e.hc(P).psihat, e.n),
+    data: (e, P) => e.hc(P).psihat, // already fft-shifted [ikx*n+iky]
     caption: () => 'log₁₀|ψ̂(k)|/max of ψ = exp(−Φ_v/2ν) at time D (heat-equation solution). The multiplier exp(−νk²D) acts here; the floor of this map shows the numerical dynamic range.',
   },
   speed: {

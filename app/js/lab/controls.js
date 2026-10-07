@@ -2,7 +2,7 @@
 
 import { slider, checkbox, button } from '../viz/ui.js';
 import { el, sel, numIn, fmtNum } from './dom.js';
-import { GRID_2D, GRID_3D, defaultN, defaultLive } from './state.js';
+import { GRID_2D, GRID_3D } from './state.js';
 
 const gridOptions = (mode) => (mode === 3 ? GRID_3D : GRID_2D).map((n) => [n, mode === 3 ? `${n}³` : `${n}²`]);
 const methodOptions = (mode) => (mode === 3
@@ -82,6 +82,8 @@ export function buildControls(app, host) {
   C.nu = slider(gd, { label: 'ν [L²]', min: 1e-6, max: 1e-2, value: S.nu, log: true, onInput: set('nu', 'all'), format: (v) => v.toExponential(1) });
   C.me = sel(gd, { label: 'HC method', options: methodOptions(S.mode), value: S.me, onChange: (v) => { app.setParam('me', Number(v), 'all'); C.syncVisibility(); } });
   C.mx = slider(gd, { label: 'max_exp', min: 10, max: 60, step: 1, value: S.mx, onInput: set('mx', 'all'), format: (v) => v.toFixed(0) });
+  C.hcNote = el('p', 'lab-note-line', gd);
+  C.hcNote.hidden = true;
   const runRow = el('div', 'hcc-row lab-runrow', gd);
   C.live = checkbox(runRow, { label: 'live update', value: S.live, onChange: (v) => app.setParam('live', v, 'live') });
   C.run = button(runRow, { label: 'Run', onClick: () => app.runNow() });
@@ -123,17 +125,23 @@ export function buildControls(app, host) {
   };
 
   C.setDsc = (dsc, dsc1, D) => {
-    const crossed = (v) => (D > v ? ' crossed' : '');
     C.dsc.innerHTML = `D<sub>sc</sub>(order ${S.order}) = <b class="${D > dsc ? 'lab-bad' : ''}">${fmtNum(dsc, 3)}</b> &nbsp; D<sub>sc</sub>(1) = <b class="${D > dsc1 ? 'lab-bad' : ''}">${fmtNum(dsc1, 3)}</b>`;
-    void crossed;
+  };
+  /** Show the effective viscosity actually used by the last Hopf–Cole solve. */
+  C.setNuEff = (hc, nu) => {
+    if (!hc) { C.hcNote.hidden = true; return; }
+    const raised = hc.nuEff > nu * 1.001;
+    C.hcNote.hidden = false;
+    C.hcNote.className = 'lab-note-line' + (raised ? ' lab-bad' : '');
+    C.hcNote.textContent = raised
+      ? `ν_eff = ${fmtNum(hc.nuEff, 3)} (raised from ν: exponent range ${fmtNum(hc.range, 3)} exceeds max_exp)`
+      : `ν_eff = ${fmtNum(hc.nuEff, 3)}, exponent range ${fmtNum(hc.range, 3)}`;
   };
   C.setDirty = (b) => {
     C.run.el.classList.toggle('lab-pending', b);
     C.run.setLabel(b ? 'Run (changes pending)' : 'Run');
   };
-  C.setBusy = (b) => { C.run.setDisabled(b); };
 
   C.syncVisibility();
-  void defaultN; void defaultLive;
   return C;
 }

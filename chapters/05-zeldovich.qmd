@@ -119,7 +119,6 @@ map $\mathbf q(\mathbf x) = \mathbf x - D\,\mathbf u(\mathbf x, D)$:
 
 $$
 1 + \delta(\mathbf x, D) = \det\frac{\partial\mathbf q}{\partial\mathbf x}
-= \det\!\big(\mathbf 1 - D\,\nabla\mathbf u\big)
 = \det\!\big(\mathbf 1 - D\,\nabla\nabla\Phi\big) .
 $$ {#eq-density-hc}
 

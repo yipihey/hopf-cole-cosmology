@@ -22,7 +22,7 @@ export class Spectra {
     this.app = app;
     const S = app.S;
     this.root = el('div', 'lab-spectra', host);
-    const grid = el('div', 'hcc-grid2 lab-grid', this.root);
+    const grid = el('div', 'lab-plots-grid', this.root);
 
     // ---- P(k) panel
     const pp = this.pPanel = el('div', 'hcc-panel lab-panel', grid);
@@ -40,15 +40,15 @@ export class Spectra {
       onInput: (v) => { S.km = v; app.hashChanged(); this.drawIfReady(); } });
     this.csOut = readout(cbs, { label: 'c_s²' });
     this.pkHost = el('div', 'lab-plot', pp);
-    this.pkPlot = new LinePlot(this.pkHost, { width: 560, height: 400 });
+    this.pkPlot = new LinePlot(this.pkHost, { width: 500, height: 380 });
     el('p', 'hcc-note lab-cap', pp, 'Dashed vertical lines mark k_Nyq and the smoothing scale 1/R. Linear theory is the smooth curve D²P0(k); the 1-loop curves are only available for Gaussian ICs. The EFT curve subtracts 2c_s²k²P_lin from the SPT 1-loop with c_s² fitted to the measured spectrum for k < k_max.');
 
     // ---- r(k) panel
     const rp = this.rPanel = el('div', 'hcc-panel lab-panel', grid);
     el('div', 'hcc-title', rp, 'Cross-correlation with the linear field r(k)');
     this.rHost = el('div', 'lab-plot', rp);
-    this.rPlot = new LinePlot(this.rHost, { width: 560, height: 400 });
-    el('p', 'hcc-note lab-cap', rp, 'r(k) = P_{f,lin} / √(P_f P_lin) measures how much of the evolved field’s phase information still matches linear theory. The dashed curve is the Zel’dovich estimate exp(−k²σ_Ψ²D²/2), with σ_Ψ² the per-axis displacement variance of the grid modes (Gaussian ICs only; approximate once streams cross).');
+    this.rPlot = new LinePlot(this.rHost, { width: 500, height: 380 });
+    el('p', 'hcc-note lab-cap', rp, 'r(k) = P_{f,lin} / √(P_f P_lin) measures how much of the evolved field’s phase information still matches linear theory. The dashed curve is the Zel’dovich propagator exp(−k²σ_Ψ²D²/2), with σ_Ψ² the per-axis displacement variance of the grid modes (Gaussian ICs only). It equals r(k) only while the evolved power is still close to linear, and is only approximate once streams cross.');
 
     // ---- readouts
     const ro = this.roRow = el('div', 'hcc-controls lab-readouts', this.root);
@@ -80,17 +80,18 @@ export class Spectra {
   /** Tasks that fill the caches and finally draw both plots. */
   tasks(P) {
     const e = this.app.eng, w = this.wants();
-    const prim = e.dim === 2 ? 'sheet' : 'cic';
+    const dim = P.mode, gaussian = P.ic === 'g';      // engine state may not be configured yet when tasks are built
+    const prim = dim === 2 ? 'sheet' : 'cic';
     const t = [];
     t.push({ label: 'P(k) linear', fn: () => { e.pk('lin', P); e.plinFine(P); } });
     if (w.has('sheet')) t.push({ label: `P(k) ${prim}`, fn: () => e.pk(prim, P, prim === 'cic') });
-    if (w.has('cic') && e.dim === 2) t.push({ label: 'P(k) CIC', fn: () => e.pk('cic', P, true) });
+    if (w.has('cic') && dim === 2) t.push({ label: 'P(k) CIC', fn: () => e.pk('cic', P, true) });
     if (w.has('hc')) t.push({ label: 'P(k) Hopf–Cole', fn: () => e.pk('hc', P) });
     t.push({ label: 'r(k)', fn: () => { e.rk(prim, P); e.rk('hc', P); e.sigmaV2(); } });
-    if (e.gaussian && (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13'))) {
+    if (gaussian && (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13'))) {
       t.push({ label: 'SPT 1-loop', heavy: true, fn: () => e.loop(P, 0) });
     }
-    if (e.gaussian && w.has('za')) t.push({ label: 'Zel’dovich 1-loop', heavy: true, fn: () => e.loop(P, 1) });
+    if (gaussian && w.has('za')) t.push({ label: 'Zel’dovich 1-loop', heavy: true, fn: () => e.loop(P, 1) });
     t.push({ label: 'plots', fn: () => this.draw(P) });
     return t;
   }
@@ -160,7 +161,7 @@ export class Spectra {
     const sv2 = e.sigmaV2();
     if (sv2 !== null) {
       const ks = Float64Array.from({ length: 160 }, (_, i) => kminPlot * Math.pow(kmaxPlot / kminPlot, i / 159));
-      rs.push({ x: ks, y: Float64Array.from(ks, (k) => Math.exp(-0.5 * k * k * sv2 * P.D * P.D)), label: 'Zel’dovich exp(−k²σ²D²/2)', color: '#8a8f98', dash: '5 3', width: 1.8 });
+      rs.push({ x: ks, y: Float64Array.from(ks, (k) => Math.exp(-0.5 * k * k * sv2 * P.D * P.D)), label: 'Zel’dovich propagator', color: '#8a8f98', dash: '5 3', width: 1.8 });
     }
     this.rPlot.setAxes({ xlog: true, ylog: false, xlabel: 'k  [rad / L]', ylabel: 'r(k)', xlim: [kminPlot, kmaxPlot], ylim: [0, 1.05] });
     this.rPlot.setSeries(rs);

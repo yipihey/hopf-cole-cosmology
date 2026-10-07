@@ -51,6 +51,7 @@ export class Fields3D {
     checkbox(p.opts, { label: 'log', value: S.l1, onChange: (v) => { S.l1 = v; app.hashChanged(); app.runPanel(this, 0); } });
     const { cv, bar } = this.canvasBlock(p.root);
     this.cvV = cv; this.barV = bar;
+    if (!app.gpu) cv.classList.add('hcc-wide');     // the Canvas2D fallback shows three slices side by side
     this.capV = el('p', 'hcc-note lab-cap', p.root);
     this.hintV = el('p', 'hcc-note lab-hint', p.root, 'Drag to rotate, wheel to zoom, double-click to reset (WebGPU). Without WebGPU: three central slices.');
   }
@@ -73,13 +74,12 @@ export class Fields3D {
     const S = this.app.S, app = this.app;
     const p = this['pf' + slot] = this.panel('Fourier');
     const abs = kind === 'fabs';
-    const title = el('span', 'lab-ptitle', p.head, abs ? '|δ̂(k)| of' : 'phase of δ̂(k) of');
+    el('span', 'lab-ptitle', p.head, abs ? '|δ̂(k)| of' : 'phase of δ̂(k) of');
     const s = sel(p.head, { options: FIELDS.map(([v, l]) => [v, l.replace(' density', '').replace(' 1+Dδ0', '')]), value: S.fo, onChange: (v) => {
       S.fo = v; app.hashChanged(); this['fsel' + (slot === 2 ? 3 : 2)].set(v);
       app.runPanel(this, 2); app.runPanel(this, 3);
     } });
     this['fsel' + slot] = s;
-    void title;
     const cmapKey = abs ? 'c3' : 'c4';
     sel(p.opts, { label: 'map', options: CMAPS, value: S[cmapKey], onChange: (v) => { S[cmapKey] = v; app.hashChanged(); this.updateFourier(slot); } });
     const { cv, bar } = this.canvasBlock(p.root);
@@ -196,7 +196,6 @@ export class Fields3D {
     }
   }
 
-  /** The grid size changed: refresh the slice index slider limits. */
   destroy() {
     this.ro.disconnect();
     for (const v of [this.vv, this.fvS, this.fv2, this.fv3]) { try { if (v) v.destroy(); } catch (e) { /* ignore */ } }

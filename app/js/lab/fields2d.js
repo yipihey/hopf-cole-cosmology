@@ -113,7 +113,7 @@ class Slot {
     try {
       let { kind, def, sub, cmap, log } = this.cfg;
       this.syncHidden(def);
-      this.cap.textContent = def.caption(sub);
+      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG.sheetcpu : def).caption(sub);
       this.note.hidden = true;
       const n = eng.n;
       if (def.gpu && this.app.gpu) {

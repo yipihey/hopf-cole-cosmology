@@ -22,9 +22,7 @@ html { color-scheme: light dark; }
 .lab-main { min-width: 0; }
 @media (max-width: 960px) {
   .lab-shell { grid-template-columns: minmax(0, 1fr); padding: 0.5rem; }
-  .lab-controls { position: static; max-height: none; overflow: visible; }
-  .lab-gbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 0.15rem 1rem; }
-  .lab-gbody > .lab-block, .lab-gbody > p, .lab-gbody > .lab-dsc, .lab-gbody > .lab-runrow { grid-column: 1 / -1; }
+  .lab-controls { position: static; max-height: none; overflow: visible; display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 0 0.6rem; align-items: start; }
 }
 
 /* control groups */
@@ -102,3 +100,13 @@ html { color-scheme: light dark; }
 #lab-status-text.err { color: var(--lab-bad); }
 @keyframes lab-pulse { from { opacity: 0.35; } to { opacity: 1; } }
 @media (max-width: 960px) { .lab-timing { display: none; } }
+
+/* plot / panel grids that stay readable at narrow widths */
+.lab-plots-grid { display: grid; gap: var(--hcc-gap); margin: 0.4rem 0; grid-template-columns: repeat(auto-fit, minmax(max(24rem, 49%), 1fr)); }
+.lab-fields2d .lab-grid, .lab-fields3d .lab-grid { grid-template-columns: repeat(auto-fit, minmax(max(19rem, 49%), 1fr)); }
+
+.lab-note-line { margin: 0.1rem 0 0; font-size: 0.75rem; color: var(--hcc-muted); font-variant-numeric: tabular-nums; }
+.lab-note-line[hidden] { display: none; }
+.lab-note-line.lab-bad { color: var(--lab-bad); }
+
+.lab-working, .lab-working * { cursor: progress; }

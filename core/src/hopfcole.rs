@@ -19,12 +19,14 @@ pub struct HopfColeResult {
     pub velocity: Vec<f32>,
     /// ln ψ(x,D) (up to a constant)
     pub lnpsi: Vec<f32>,
-    /// log10 |ψ̂(k,D)| normalized to its maximum
+    /// log10 |ψ̂(k,D)| normalized to its maximum, fft-shifted n×n map (k_z = 0 plane in 3D)
     pub psihat_log: Vec<f32>,
     /// effective viscosity actually used (after the precision floor)
     pub nu_eff: f64,
     /// dynamic range exponent (ϕ_max-ϕ_min)/(2ν)
     pub exponent_range: f64,
+    /// grid floor of the real-space method, ν_min ≈ dx²/(4 D refine²) (0 for the spectral method)
+    pub nu_floor: f64,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -151,7 +153,7 @@ pub fn hopf_cole_solve(grid: &Grid, eng: &mut FftEngine, phi: &[f64], nu: f64, d
             for idx in 0..grid.size {
                 psihat[idx] *= (-nu_eff * grid.k2(idx) * dgrow).exp();
             }
-            let pl = psihat_log_map(&psihat);
+            let pl = psihat_log_map(grid, &psihat);
             let psi = eng.inverse_to_real(psihat);
             (psi.iter().map(|&p| p.max(1e-290).ln()).collect(), pl)
         }
@@ -190,11 +192,15 @@ pub fn hopf_cole_solve(grid: &Grid, eng: &mut FftEngine, phi: &[f64], nu: f64, d
             let lmax = lnpsi.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             let mut psihat: Vec<C64> = lnpsi.iter().map(|&l| C64::new((l - lmax).max(-700.0).exp(), 0.0)).collect();
             eng.forward(&mut psihat);
-            let pl = psihat_log_map(&psihat);
+            let pl = psihat_log_map(grid, &psihat);
             (lnpsi, pl)
         }
     };
     let exponent_range = range / (2.0 * nu_eff);
+    let nu_floor = match method {
+        HcMethod::RealSpace { refine } => grid.dx().powi(2) / (4.0 * dgrow.max(1e-12) * (refine.max(1) as f64).powi(2)),
+        _ => 0.0,
+    };
     // Φ_v = -2ν ln ψ ; velocity u = ∇Φ_v ; Hessian H = ∇∇Φ_v.
     // Derivatives are 4th-order central finite differences: they are local, so
     // an under-resolved shock (width ν/Δu) does not produce global Gibbs ringing
@@ -235,6 +241,7 @@ pub fn hopf_cole_solve(grid: &Grid, eng: &mut FftEngine, phi: &[f64], nu: f64, d
         psihat_log,
         nu_eff,
         exponent_range,
+        nu_floor,
     }
 }
 
@@ -278,13 +285,9 @@ pub fn fd_second_derivative(grid: &Grid, f: &[f64], axis: usize) -> Vec<f64> {
     out
 }
 
-fn psihat_log_map(psihat: &[C64]) -> Vec<f32> {
-    let mut maxabs = 0.0f64;
-    for v in psihat.iter() {
-        maxabs = maxabs.max(v.norm());
-    }
-    let maxabs = maxabs.max(1e-300);
-    psihat.iter().map(|v| ((v.norm() / maxabs).max(1e-300)).log10() as f32).collect()
+/// fft-shifted log10 |ψ̂|/max map (n×n; k_z = 0 plane in 3D), same layout as spectra::fourier_maps.
+fn psihat_log_map(grid: &Grid, psihat: &[C64]) -> Vec<f32> {
+    crate::spectra::fourier_maps(grid, psihat).0
 }
 
 /// Zero-viscosity limit via the Hopf–Lax (Lax–Oleinik) formula in 1D:

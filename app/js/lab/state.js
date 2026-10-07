@@ -24,7 +24,7 @@ export function makeDefaults(mode = 2) {
     pn: -1, ns: 1, gm: 30, seed: 1, R: 0.02, sg: 1,
     sp: 0,                  // sigma0 for the deterministic presets (0 = keep amplitudes)
     k1: [2, 0, 0], k2: [0, 3, 0], a1: 1, a2: 1, f1: 0, f2: 0,
-    pa: 1, pw: 0.08,
+    pa: 2, pw: 0.08,
     // dynamics
     D: 0.3, order: 2, nu: 1e-4, me: 1, mx: 30, live: defaultLive(mode),
     // layout

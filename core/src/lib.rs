@@ -166,12 +166,28 @@ impl Cosmo {
         let qmax = self.grid.knyq() * 4.0;
         ks.iter()
             .map(|&k| {
-                let (p22, p13) = spectra::one_loop(&f, self.grid.dim, k, kernels, qmin, qmax, 160, 96);
+                let (p22, p13) = spectra::one_loop(&f, self.grid.dim, k, kernels, qmin, qmax, 120, 64);
                 [d * d * f(k), d.powi(4) * p22, d.powi(4) * p13]
             })
             .collect()
     }
     pub fn shell_crossing(&self, order: usize) -> f64 {
-        self.lpt_ref().shell_crossing(order)
+        if order <= 1 { self.lpt_ref().zeldovich_shell_crossing() } else { self.lpt_ref().shell_crossing(order) }
+    }
+    pub fn built_order(&self) -> usize {
+        self.lpt.as_ref().map(|l| l.order).unwrap_or(0)
+    }
+    pub fn has_linear_pk(&self) -> bool {
+        self.pk.is_some()
+    }
+    /// Grid estimate of σ_v² = (1/d)(1/L^d) Σ_k P_lin(k)/k² (for the Zel'dovich propagator).
+    pub fn sigma_v2(&self) -> f64 {
+        let pk = match &self.pk { Some(p) => p, None => return 0.0 };
+        let mut s = 0.0;
+        for idx in 1..self.grid.size {
+            let k2 = self.grid.k2(idx);
+            if k2 > 0.0 { s += pk.eval(k2.sqrt()) / k2; }
+        }
+        s / (self.grid.dim as f64) / self.grid.l.powi(self.grid.dim as i32)
     }
 }

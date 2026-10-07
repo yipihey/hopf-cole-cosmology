@@ -69,7 +69,8 @@ export class Lab {
 
   reportError(label, err) {
     console.error(`[lab] ${label}:`, err);
-    this.setStatus(`error in ${label}: ${err && err.message ? err.message : err}`, 'err');
+    this.lastError = `error in ${label}: ${err && err.message ? err.message : err}`;
+    this.setStatus(this.lastError, 'err');
   }
 
   /** Called by controls for every changed parameter. */
@@ -110,6 +111,7 @@ export class Lab {
     this.hashChanged();
     this.markStale(true);
     this.ensureFields(S);
+    this.eng.timings.clear(); this.showTimings();
     if (m === 3) {
       this.setDirty(true);
       this.setStatus('3D: choose parameters, then press Run.');
@@ -118,7 +120,7 @@ export class Lab {
 
   setDirty(b) { this.dirty = b; this.controls.setDirty(b); }
 
-  invalidate() { this.runGen++; }
+  invalidate() { this.runGen++; document.body.classList.remove('lab-working'); }
 
   schedule(ms) {
     clearTimeout(this.timers.run);
@@ -175,15 +177,17 @@ export class Lab {
     for (const t of tasks) {
       if (gen !== this.runGen) return false;
       this.setStatus(`computing: ${t.label} …`, 'busy');
+      document.body.classList.add('lab-working');
       await (t.heavy ? paint() : tick());
       if (gen !== this.runGen) return false;
       try {
         await t.fn();
       } catch (err) {
         this.reportError(t.label, err);
-        if (t.critical) return false;
+        if (t.critical) { document.body.classList.remove('lab-working'); return false; }
       }
     }
+    document.body.classList.remove('lab-working');
     return true;
   }
 
@@ -195,6 +199,7 @@ export class Lab {
     this.P = structuredClone(S);
     const P = this.P;
     this.setDirty(false);
+    this.lastError = null;
     const t0 = performance.now();
     this.eng.timings.clear();
     this.ensureFields(P);
@@ -214,7 +219,8 @@ export class Lab {
     const ok = await this.runTasks(tasks, gen);
     if (gen !== this.runGen) return;
     this.refreshReadouts();
-    if (ok) this.setStatus(`ready · ${P.mode}D ${P.n}${P.mode === 2 ? '²' : '³'} · order ${P.order} · D = ${P.D.toFixed(3)} · ${fmtMs(performance.now() - t0)}`);
+    if (this.lastError) this.setStatus(this.lastError, 'err');
+    else if (ok) this.setStatus(`ready · ${P.mode}D ${P.n}${P.mode === 2 ? '²' : '³'} · order ${P.order} · D = ${P.D.toFixed(3)} · ${fmtMs(performance.now() - t0)}`);
     this.showTimings();
   }
 
@@ -224,14 +230,14 @@ export class Lab {
     const P = this.P;
     const tasks = k === 'f' ? this.fields.tasks(P) : this.spectra.tasks(P);
     await this.runTasks(tasks, gen);
-    if (gen === this.runGen) { this.setStatus('ready'); this.showTimings(); }
+    if (gen === this.runGen) { if (this.lastError) this.setStatus(this.lastError, 'err'); else this.setStatus('ready'); this.showTimings(); }
   }
 
-  runSpectra() { if (this.eng.sim && this.visible('s')) this.runSection('s'); }
+  runSpectra() { if (this.eng.sim && this.eng.dim === this.S.mode && this.visible('s')) this.runSection('s'); }
 
   /** Re-render one field panel from cache (display-only change). */
   async runPanel(owner, idx) {
-    if (!this.eng.sim) return;
+    if (!this.eng.sim || this.eng.dim !== this.fieldsMode) return;
     const gen = this.runGen;
     this.setStatus('drawing panel …', 'busy');
     await tick();
@@ -267,6 +273,7 @@ export class Lab {
     const g = (o) => { const v = e.peek(['dsc', o]); return v === undefined ? NaN : v; };
     const dsc = g(this.P.order), dsc1 = g(1);
     this.controls.setDsc(dsc, dsc1, this.P.D);
+    this.controls.setNuEff(e.hcCached(this.P), this.P.nu);
     this.spectra.updateReadouts(this.P, { dsc, dsc1 });
   }
 

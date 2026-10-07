@@ -319,24 +319,56 @@ impl Lpt {
         j.iter().cloned().fold(f64::INFINITY, f64::min)
     }
 
+    /// Zel'dovich (1LPT) shell-crossing time 1/max_q(-λ_min(M^(1))), computed per point.
+    pub fn zeldovich_shell_crossing(&self) -> f64 {
+        let d = self.grid.dim;
+        let mut lam_max = 0.0f64;
+        let mut m = vec![0.0; 9];
+        for idx in 0..self.grid.size {
+            self.tensor_at(1, idx, &mut m);
+            let lmin = if d == 2 {
+                let tr = m[0] + m[3];
+                let det = m[0] * m[3] - m[1] * m[2];
+                0.5 * tr - (0.25 * tr * tr - det).max(0.0).sqrt()
+            } else if d == 3 {
+                // smallest eigenvalue of a symmetric 3x3 via the trigonometric formula
+                let a = [m[0], m[4], m[8], m[1], m[2], m[5]]; // xx yy zz xy xz yz
+                let q = (a[0] + a[1] + a[2]) / 3.0;
+                let p2 = (a[0] - q).powi(2) + (a[1] - q).powi(2) + (a[2] - q).powi(2) + 2.0 * (a[3] * a[3] + a[4] * a[4] + a[5] * a[5]);
+                let pp = (p2 / 6.0).sqrt();
+                if pp < 1e-300 { q } else {
+                    let b = [(a[0] - q) / pp, (a[1] - q) / pp, (a[2] - q) / pp, a[3] / pp, a[4] / pp, a[5] / pp];
+                    let detb = b[0] * (b[1] * b[2] - b[5] * b[5]) - b[3] * (b[3] * b[2] - b[5] * b[4]) + b[4] * (b[3] * b[5] - b[1] * b[4]);
+                    let r = (detb / 2.0).clamp(-1.0, 1.0);
+                    let phi = r.acos() / 3.0;
+                    q + 2.0 * pp * (phi + 2.0 * std::f64::consts::PI / 3.0).cos()
+                }
+            } else { m[0] };
+            lam_max = lam_max.max(-lmin);
+        }
+        if lam_max > 0.0 { 1.0 / lam_max } else { f64::INFINITY }
+    }
+
     /// First shell-crossing time: smallest D > 0 with min_q J(q,D) = 0.
     pub fn shell_crossing(&self, order: usize) -> f64 {
         // bracket on a log grid, then bisect
+        // 1LPT gives an analytic lower bound: J = Π(1 + D λ_i) first vanishes at
+        // D = 1/max(-λ_min); use it to start the bracket close to the answer.
         let mut lo = 0.0f64;
         let mut hi = 0.0f64;
-        let mut dd = 1e-3;
-        for _ in 0..80 {
+        let mut dd = 0.5 * self.zeldovich_shell_crossing().min(1e3).max(1e-3);
+        for _ in 0..40 {
             if self.min_jacobian(dd, order) <= 0.0 {
                 hi = dd;
                 break;
             }
             lo = dd;
-            dd *= 1.25;
+            dd *= 1.6;
         }
         if hi == 0.0 {
             return f64::INFINITY;
         }
-        for _ in 0..40 {
+        for _ in 0..16 {
             let mid = 0.5 * (lo + hi);
             if self.min_jacobian(mid, order) <= 0.0 {
                 hi = mid;

@@ -11,7 +11,7 @@ export async function loadCore() {
     _loading = (async () => {
       const url = new URL('../pkg/hcc_core.js', import.meta.url);
       const mod = await import(url.href);
-      await mod.default(new URL('../pkg/hcc_core_bg.wasm', import.meta.url));
+      await mod.default({ module_or_path: new URL('../pkg/hcc_core_bg.wasm', import.meta.url) });
       _mod = mod;
       return mod;
     })();

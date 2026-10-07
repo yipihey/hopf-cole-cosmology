@@ -52,24 +52,36 @@ impl CosmoSim {
         self.hc = None;
     }
     pub fn build_lpt(&mut self, order: usize) { self.inner.build_lpt(order); }
-    pub fn positions(&self, d: f64, order: usize) -> Vec<f32> { self.inner.positions(d, order) }
-    pub fn velocities(&self, d: f64, order: usize) -> Vec<f32> { self.inner.velocities(d, order) }
-    pub fn sheet_density(&self, d: f64, order: usize, ne: usize, ss: usize) -> Vec<f32> { self.inner.sheet_density(d, order, ne, ss) }
-    pub fn cic_density(&self, d: f64, order: usize, ne: usize) -> Vec<f32> { self.inner.cic_density(d, order, ne) }
+    /// Highest LPT order built so far (0 = none).
+    pub fn built_order(&self) -> usize { self.inner.built_order() }
+    pub fn has_hc(&self) -> bool { self.hc.is_some() }
+    pub fn has_linear_pk(&self) -> bool { self.inner.has_linear_pk() }
+    pub fn sigma_v2(&self) -> f64 { self.inner.sigma_v2() }
+    fn ok_order(&self, order: usize) -> bool { order >= 1 && order <= self.inner.built_order() }
+    pub fn positions(&self, d: f64, order: usize) -> Vec<f32> { if !self.ok_order(1) { return vec![]; } self.inner.positions(d, order) }
+    pub fn velocities(&self, d: f64, order: usize) -> Vec<f32> { if !self.ok_order(1) { return vec![]; } self.inner.velocities(d, order) }
+    /// 2D only (returns the CIC density in 3D).
+    pub fn sheet_density(&self, d: f64, order: usize, ne: usize, ss: usize) -> Vec<f32> {
+        if !self.ok_order(1) { return vec![]; }
+        if self.inner.grid.dim == 2 { self.inner.sheet_density(d, order, ne, ss) } else { self.inner.cic_density(d, order, ne) }
+    }
+    pub fn cic_density(&self, d: f64, order: usize, ne: usize) -> Vec<f32> { if !self.ok_order(1) { return vec![]; } self.inner.cic_density(d, order, ne) }
     pub fn linear_delta(&mut self, d: f64) -> Vec<f32> { self.inner.linear_delta(d) }
     pub fn phi0(&self) -> Vec<f32> { self.inner.phi0.iter().map(|&v| v as f32).collect() }
-    pub fn lpt_psi(&self, order: usize, comp: usize) -> Vec<f32> { self.inner.lpt_ref().psi[order - 1][comp].clone() }
-    pub fn lpt_div(&self, order: usize) -> Vec<f32> { self.inner.lpt_ref().div[order - 1].clone() }
+    pub fn lpt_psi(&self, order: usize, comp: usize) -> Vec<f32> { if !self.ok_order(order) || comp >= self.inner.grid.dim { return vec![]; } self.inner.lpt_ref().psi[order - 1][comp].clone() }
+    pub fn lpt_div(&self, order: usize) -> Vec<f32> { if !self.ok_order(order) { return vec![]; } self.inner.lpt_ref().div[order - 1].clone() }
     pub fn lpt_curl(&self, order: usize, comp: usize) -> Vec<f32> {
+        if !self.ok_order(order) { return vec![]; }
         let l = self.inner.lpt_ref();
-        if l.curl[order - 1].is_empty() { vec![0.0; l.grid.size] } else { l.curl[order - 1][comp].clone() }
+        if l.curl[order - 1].is_empty() || comp >= l.curl[order - 1].len() { vec![0.0; l.grid.size] } else { l.curl[order - 1][comp].clone() }
     }
     pub fn jacobian(&self, d: f64, order: usize) -> Vec<f32> {
+        if !self.ok_order(1) { return vec![]; }
         let mut j = vec![0.0f64; self.inner.grid.size];
         self.inner.lpt_ref().jacobian(d, order, &mut j);
         j.iter().map(|&v| v as f32).collect()
     }
-    pub fn shell_crossing(&self, order: usize) -> f64 { self.inner.shell_crossing(order) }
+    pub fn shell_crossing(&self, order: usize) -> f64 { if !self.ok_order(1) { return f64::INFINITY; } self.inner.shell_crossing(order) }
 
     /// method 0 = Fourier multiplier (dynamic range limited to max_exp),
     /// method ≥ 1 = real-space log-domain kernel with refinement factor = method.
@@ -77,13 +89,16 @@ impl CosmoSim {
         let m = if method == 0 { HcMethod::Spectral { max_exp } } else { HcMethod::RealSpace { refine: method as usize } };
         self.hc = Some(self.inner.hopf_cole(d, nu, m));
     }
-    pub fn hc_delta(&self) -> Vec<f32> { self.hc.as_ref().unwrap().delta.clone() }
-    pub fn hc_phi(&self) -> Vec<f32> { self.hc.as_ref().unwrap().phi_v.clone() }
-    pub fn hc_velocity(&self) -> Vec<f32> { self.hc.as_ref().unwrap().velocity.clone() }
-    pub fn hc_lnpsi(&self) -> Vec<f32> { self.hc.as_ref().unwrap().lnpsi.clone() }
-    pub fn hc_psihat_log(&self) -> Vec<f32> { self.hc.as_ref().unwrap().psihat_log.clone() }
-    pub fn hc_nu_eff(&self) -> f64 { self.hc.as_ref().unwrap().nu_eff }
-    pub fn hc_exponent_range(&self) -> f64 { self.hc.as_ref().unwrap().exponent_range }
+    pub fn hc_delta(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.delta.clone()).unwrap_or_default() }
+    pub fn hc_phi(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.phi_v.clone()).unwrap_or_default() }
+    pub fn hc_velocity(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.velocity.clone()).unwrap_or_default() }
+    pub fn hc_lnpsi(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.lnpsi.clone()).unwrap_or_default() }
+    /// fft-shifted n×n map of log10 |ψ̂|/max (same layout as fourier_amp).
+    pub fn hc_psihat_log(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.psihat_log.clone()).unwrap_or_default() }
+    pub fn hc_nu_eff(&self) -> f64 { self.hc.as_ref().map(|h| h.nu_eff).unwrap_or(f64::NAN) }
+    pub fn hc_exponent_range(&self) -> f64 { self.hc.as_ref().map(|h| h.exponent_range).unwrap_or(f64::NAN) }
+    /// Grid floor ν_min ≈ dx²/(4 D refine²) of the real-space method (0 for the Fourier method).
+    pub fn hc_nu_floor(&self) -> f64 { self.hc.as_ref().map(|h| h.nu_floor).unwrap_or(f64::NAN) }
 
     /// Returns flat [k..., P..., N...] (3 × nb entries, nb = number of non-empty bins).
     pub fn power_spectrum(&mut self, f: &[f32], nbins: usize, deconvolve_cic: bool) -> Vec<f64> {
@@ -103,6 +118,23 @@ impl CosmoSim {
     /// Fourier amplitude map: log10|f̂|/max, fft-shifted n×n (k_z = 0 plane in 3D).
     pub fn fourier_amp(&mut self, f: &[f32]) -> Vec<f32> { self.inner.fourier_maps(f).0 }
     pub fn fourier_phase(&mut self, f: &[f32]) -> Vec<f32> { self.inner.fourier_maps(f).1 }
+    /// Both maps from one FFT: [amp (n*n)..., phase (n*n)...].
+    pub fn fourier_maps(&mut self, f: &[f32]) -> Vec<f32> {
+        let (a, p) = self.inner.fourier_maps(f);
+        let mut out = a; out.extend(p); out
+    }
+    /// Auto spectra of f and g and their cross spectrum from two FFTs:
+    /// flat [k..., Pff..., Pgg..., Pfg..., N...] (5 × nb).
+    pub fn auto_cross_spectra(&mut self, f: &[f32], g: &[f32], nbins: usize) -> Vec<f64> {
+        let fh = self.inner.eng.forward_real_f32(f);
+        let gh = self.inner.eng.forward_real_f32(g);
+        let sff = crate::spectra::power_spectrum_hat(&self.inner.grid, &fh, &fh, nbins, None);
+        let sgg = crate::spectra::power_spectrum_hat(&self.inner.grid, &gh, &gh, nbins, None);
+        let sfg = crate::spectra::power_spectrum_hat(&self.inner.grid, &fh, &gh, nbins, None);
+        let mut out = sff.k.clone();
+        out.extend(sff.p.iter()); out.extend(sgg.p.iter()); out.extend(sfg.p.iter()); out.extend(sff.nmodes.iter());
+        out
+    }
     pub fn linear_pk(&self, ks: &[f64], d: f64) -> Vec<f64> { ks.iter().map(|&k| self.inner.linear_pk(k, d)).collect() }
     /// Returns flat [Plin..., P22..., P13...] for kernels 0 = SPT, 1 = Zel'dovich.
     pub fn one_loop(&self, ks: &[f64], d: f64, kernels: u32) -> Vec<f64> {

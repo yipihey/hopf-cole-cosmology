@@ -6,7 +6,7 @@ const NOTES = [
   {
     title: 'What is the phase-space sheet?',
     open: true,
-    html: `Cold dark matter occupies a thin three-dimensional sheet in six-dimensional phase space (here: a two-dimensional sheet in four dimensions).
+    html: `Cold dark matter occupies a thin three-dimensional sheet in six-dimensional phase space (in 2D mode: a two-dimensional sheet in four-dimensional phase space).
       Every Lagrangian label <b>q</b> is carried to <b>x</b>(q, D) = q + ΣₙDⁿ Ψ⁽ⁿ⁾(q), where the displacement terms Ψ⁽ⁿ⁾ are built recursively from the initial field.
       The density is the sum of 1/|J| over all points of the sheet that project onto the same <b>x</b>, with J = det ∂x/∂q. Where J reaches zero the sheet folds over itself (shell crossing) and the density has caustics; beyond it several streams overlap.
       The GPU panel draws every triangle of the deformed grid with additive blending, so overlapping streams add up exactly as they should; the “wire” view shows the folds themselves.
