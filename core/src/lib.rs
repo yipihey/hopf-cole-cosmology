@@ -162,7 +162,10 @@ impl Cosmo {
             None => return ks.iter().map(|_| [0.0; 3]).collect(),
         };
         let f = |k: f64| pk.eval(k);
-        let qmin = self.grid.kf() * 0.05;
+        // Loop integrals over the modes present in the periodic box only (q ≥ k_f):
+        // for red spectra the IR part cancels between P22 and P13 only when both are
+        // integrated over the same domain, and the simulation has no modes below k_f.
+        let qmin = self.grid.kf() * 0.9;
         let qmax = self.grid.knyq() * 4.0;
         ks.iter()
             .map(|&k| {
