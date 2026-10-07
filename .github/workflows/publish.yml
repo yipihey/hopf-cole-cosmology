@@ -39,6 +39,13 @@ jobs:
         with:
           version: 1.10.19
 
+      # The chapters declare `jupyter: hcc`; with freeze no cell is executed,
+      # but Quarto still resolves the kernelspec name, so register it.
+      - name: Register Jupyter kernel
+        run: |
+          python3 -m pip install --quiet ipykernel
+          python3 -m ipykernel install --user --name hcc --display-name "hcc (venv)"
+
       - name: Render site
         run: quarto render
 
