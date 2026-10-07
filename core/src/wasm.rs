@@ -206,29 +206,8 @@ pub fn zeldovich_velocity_1d(delta0: &[f64], l: f64) -> Vec<f64> {
     g.iter().map(|v| -v).collect()
 }
 
-/// Multi-stream 1D sheet density: Lagrangian points q_i = i dq mapped to x_i (unwrapped);
-/// each segment carries mass dq and deposits dq/|dx| at the Eulerian cell centres it covers.
+/// Multi-stream 1D sheet density (see burgers1d::sheet_density_1d).
 #[wasm_bindgen]
 pub fn sheet_density_1d(x: &[f64], l: f64, ne: usize) -> Vec<f64> {
-    let n = x.len();
-    let dq = l / n as f64;
-    let dxe = l / ne as f64;
-    let mut rho = vec![0.0; ne];
-    for i in 0..n {
-        let a = x[i];
-        let b = if i + 1 < n { x[i + 1] } else { x[0] + l };
-        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
-        let len = hi - lo;
-        if len < 1e-12 {
-            continue;
-        }
-        let dens = dq / len;
-        let c0 = ((lo / dxe) - 0.5).ceil() as i64;
-        let c1 = ((hi / dxe) - 0.5).floor() as i64;
-        for c in c0..=c1 {
-            let idx = c.rem_euclid(ne as i64) as usize;
-            rho[idx] += dens;
-        }
-    }
-    rho
+    burgers1d::sheet_density_1d(x, l, ne)
 }

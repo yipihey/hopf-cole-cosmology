@@ -5,8 +5,9 @@ jupyter: hcc
 
 ## A change of variables that removes the nonlinearity
 
-The claim, found independently by Eberhard Hopf (1950) and Julian Cole
-(1951) and in fact already known to Forsyth (1906) and Florin (1948), is
+The claim, found independently by Eberhard Hopf [-@hopf1950] and Julian
+Cole [-@cole1951] and in fact already known to Forsyth (1906) and Florin
+(1948), is
 that Burgers' equation
 
 $$
@@ -30,7 +31,7 @@ $$ {#eq-hj}
 
 This is a (viscous) **Hamilton–Jacobi equation**, $\Phi_t + H(\Phi_x) = \nu
 \Phi_{xx}$ with the free-particle Hamiltonian $H(p) = p^2/2$. It is also, up to
-a sign and a noise term, the **Kardar–Parisi–Zhang** equation for a growing
+a sign and a noise term, the **Kardar–Parisi–Zhang** equation [@kpz1986] for a growing
 interface of height $h = -\Phi$: $h_t = \nu h_{xx} + \tfrac12 h_x^2 + \eta$.
 (KPZ is the Burgers equation for $u = -h_x$; Martin Hairer's 2014 Fields
 Medal was in part for making sense of the noisy version.)

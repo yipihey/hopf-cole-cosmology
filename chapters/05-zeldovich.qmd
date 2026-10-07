@@ -52,7 +52,7 @@ $$ {#eq-psi1}
 
 ## The Zel'dovich approximation is Burgers' equation
 
-Zel'dovich (1970) proposed to take the linear displacement @eq-psi1
+Zel'dovich [-@zeldovich1970] proposed to take the linear displacement @eq-psi1
 seriously *beyond* linear theory: let each element keep moving in a straight
 line with its initial velocity,
 
@@ -89,7 +89,8 @@ perturbation series developed in the [next chapter](06-lpt.qmd).
 
 After shell crossing the Zel'dovich sheets pass through each other and the
 pancakes dissolve, whereas in reality gravity holds them together. Gurbatov,
-Saichev and Shandarin (1989) proposed to mimic this by adding a small
+Saichev and Shandarin [-@gurbatov1989; see also @shandarin1989; @weinberg1990;
+@vergassola1994] proposed to mimic this by adding a small
 viscosity to @eq-za-burgers,
 
 $$

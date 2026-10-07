@@ -214,3 +214,38 @@ pub fn inviscid_1d(u0: &[f64], l: f64, t: f64) -> Inviscid1D {
     }
     Inviscid1D { x_char, u, x0_star: ystar, rho, phi: phi_s }
 }
+
+/// Multi-stream 1D sheet density: Lagrangian points q_i = i dq mapped to x_i (unwrapped);
+/// each segment carries mass dq spread uniformly over [x_i, x_{i+1}] and is deposited
+/// exactly (overlap-weighted) onto the Eulerian cells: returns cell-averaged ρ/ρ̄.
+pub fn sheet_density_1d(x: &[f64], l: f64, ne: usize) -> Vec<f64> {
+    let n = x.len();
+    let dq = l / n as f64;
+    let dxe = l / ne as f64;
+    let mut rho = vec![0.0; ne];
+    for i in 0..n {
+        let a = x[i];
+        let b = if i + 1 < n { x[i + 1] } else { x[0] + l };
+        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+        let len = hi - lo;
+        if len < 1e-14 {
+            // degenerate: drop the mass into one cell
+            let idx = ((lo / dxe).floor() as i64).rem_euclid(ne as i64) as usize;
+            rho[idx] += dq / dxe;
+            continue;
+        }
+        let dens = dq / len; // ρ/ρ̄ inside the segment
+        let c0 = (lo / dxe).floor() as i64;
+        let c1 = ((hi / dxe).ceil() as i64 - 1).max(c0);
+        for c in c0..=c1 {
+            let cl = c as f64 * dxe;
+            let ch = cl + dxe;
+            let ov = hi.min(ch) - lo.max(cl);
+            if ov > 0.0 {
+                let idx = c.rem_euclid(ne as i64) as usize;
+                rho[idx] += dens * ov / dxe;
+            }
+        }
+    }
+    rho
+}

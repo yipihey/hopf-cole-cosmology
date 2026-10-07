@@ -63,6 +63,13 @@ export class Engine {
     return value;
   }
 
+  /** Cached value without computing (undefined if absent). */
+  peek(parts) {
+    const v = this.cache.get(this.gen + '|' + parts.join('|'));
+    return v ? v.value : undefined;
+  }
+  hcCached(P) { return this.peek(['hc', P.D, P.nu, P.me, P.mx]); }
+
   static icSignature(P) {
     const a = [P.mode, P.n, P.ic, P.R];
     if (P.ic === 'g') a.push(P.shape, P.pn, P.ns, P.gm, P.seed, P.sg);
@@ -169,6 +176,13 @@ export class Engine {
       if (which === 'lin') return this.linear(P);
       const rho = which === 'sheet' ? this.sheet(P) : this.cic(P);
       return fmap(rho, (v) => v - 1);
+    });
+  }
+  /** Density 1+delta (3D visualisation); linear theory clipped at 1e-3 so it can be shown on a log scale. */
+  rho(which, P) {
+    return this.memo(['rho', ...this.fieldKey(which, P)], () => {
+      if (which === 'cic') return this.cic(P);
+      return fmap(this.delta(which, P), (v) => Math.max(1e-3, v + 1));
     });
   }
   /** Fourier maps: amp = log10|f^|/max, phase; both fft-shifted, as [ikx*n+iky]. */

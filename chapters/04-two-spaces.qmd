@@ -106,8 +106,8 @@ $dy_\star/dx$ is the density $\rho/\bar\rho$, so the jump carries a finite
 mass in zero width: a shock, a pancake, a $\delta$-function in the density.
 :::
 
-Computing the lower envelope of $N$ parabolas is an $O(N)$ operation (the
-same algorithm computes Euclidean distance transforms in image processing),
+Computing the lower envelope of $N$ parabolas is an $O(N)$ operation [@felzenszwalb2012; the
+same algorithm computes Euclidean distance transforms in image processing],
 and it is separable in several dimensions. Everything we need to evolve a
 cosmological field in the adhesion model is therefore available in three
 equivalent, exact forms: a Fourier multiplier, a log-domain kernel, and a

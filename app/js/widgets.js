@@ -300,7 +300,7 @@ function zeldovich1d(el, core) {
   const N = 512, L = 1;
   const q = linspaceBox(N, L, 0);
   const ctl = controls(el);
-  const ic = select(ctl, { label: 'δ₀', options: [{ value: 'wave', label: 'single wave cos(2πx)' }, { value: 'two', label: 'two waves' }, { value: 'random', label: 'random field (R = 0.03)' }], value: 'wave', onChange: () => { needU = true; update(); } });
+  const ic = select(ctl, { label: 'δ₀', options: [{ value: 'wave', label: 'single wave −cos(2πx)' }, { value: 'two', label: 'two waves' }, { value: 'random', label: 'random field (R = 0.03)' }], value: 'wave', onChange: () => { needU = true; update(); } });
   const D = slider(ctl, { label: 'D', min: 0, max: 3, step: 0.005, value: 0.5, onInput: () => update() });
   const nu = slider(ctl, { label: 'ν', min: 1e-6, max: 1e-2, value: 1e-4, log: true, onInput: () => update() });
   const seedBtn = button(ctl, { label: 'new seed', onClick: () => { seed++; needU = true; update(); } });
@@ -312,8 +312,8 @@ function zeldovich1d(el, core) {
   const update = scheduler(() => {
     if (needU) {
       const d0 = new Float64Array(N);
-      if (ic.get() === 'wave') for (let i = 0; i < N; i++) d0[i] = Math.cos(2 * Math.PI * q[i]);
-      else if (ic.get() === 'two') for (let i = 0; i < N; i++) d0[i] = Math.cos(2 * Math.PI * q[i]) + 0.7 * Math.cos(6 * Math.PI * q[i] + 1);
+      if (ic.get() === 'wave') for (let i = 0; i < N; i++) d0[i] = -Math.cos(2 * Math.PI * q[i]);
+      else if (ic.get() === 'two') for (let i = 0; i < N; i++) d0[i] = -Math.cos(2 * Math.PI * q[i]) + 0.7 * Math.cos(6 * Math.PI * q[i] + 1);
       else { const r = randomField1D(N, L, seed, -1, 0.03); for (let i = 0; i < N; i++) d0[i] = r[i]; }
       u0 = core.zeldovich_velocity_1d(d0, L);
       needU = false;

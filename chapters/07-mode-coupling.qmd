@@ -13,7 +13,7 @@ $$
 F_n(\mathbf k_1,\dots,\mathbf k_n)\,\hat\delta_0(\mathbf k_1)\cdots\hat\delta_0(\mathbf k_n).
 $$ {#eq-spt}
 
-For gravity the kernels follow from the recursion of Goroff et al. (1986);
+For gravity the kernels follow from the recursion of @goroff1986 [reviewed in @bernardeau2002];
 the second-order one is
 
 $$
@@ -77,8 +77,7 @@ Both loop integrals extend to $q \to \infty$. With the smoothing filter they
 are finite, but they *depend on the smoothing scale* $R$ (or cutoff
 $\Lambda \sim 1/R$). Change $R$ in the laboratory and the one-loop curve
 moves, while the true large-scale dynamics must not care about what we did
-to scales we cannot resolve. The resolution (Baumann et al. 2012; Carrasco,
-Hertzberg & Senatore 2012) is that the fluid equations for the smoothed
+to scales we cannot resolve. The resolution [@baumann2012; @carrasco2012] is that the fluid equations for the smoothed
 field acquire an effective stress tensor from the unresolved small-scale
 modes, whose leading effect on the power spectrum is a **counterterm**
 
@@ -104,8 +103,8 @@ make the phase evolution visible.
 compared with that of the linear field: on large scales the phases are
 inherited from the initial conditions, on small scales they decorrelate.
 
-**The cross-correlation coefficient** (closely related to the propagator of
-Crocce & Scoccimarro 2006)
+**The cross-correlation coefficient** [closely related to the propagator of
+@crocce2006]
 
 $$
 r(k) = \frac{P_{\rm lin\times NL}(k)}{\sqrt{P_{\rm lin}(k)\,P_{\rm NL}(k)}} ,
