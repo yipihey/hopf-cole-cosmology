@@ -102,7 +102,7 @@ $\sigma \gtrsim 0.3$ because it assigns probability to negative densities.
 Gravity instead piles most of the volume up at densities somewhat below the
 mean (voids) and stretches a long tail to high densities (filaments and
 nodes); in terms of $\ln(1+\delta)$ the result is close to Gaussian, which is
-the lognormal model of Coles & Jones (1991). The shape depends on the
+the lognormal model of @coles1991. The shape depends on the
 smoothing scale: averaging over spheres of a few cells lowers the variance
 and pushes the distribution back towards a Gaussian, the central limit
 theorem at work. The laboratory's *PDFs* section compares the distributions
