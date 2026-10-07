@@ -92,6 +92,26 @@ higher-order sheet solution). The laboratory lets you fit $c_s^2$ by least
 squares over $k < k_{\max}$ and watch it change with $R$ and with the LPT
 order used as the "truth".
 
+## The one-point distribution
+
+The power spectrum is the simplest *two-point* statistic; the simplest
+*one-point* statistic is the probability distribution of the density itself,
+$\mathcal P(1+\delta)$, measured on cells of a chosen size. Linear theory
+predicts a Gaussian of width $\sigma$, which already fails qualitatively once
+$\sigma \gtrsim 0.3$ because it assigns probability to negative densities.
+Gravity instead piles most of the volume up at densities somewhat below the
+mean (voids) and stretches a long tail to high densities (filaments and
+nodes); in terms of $\ln(1+\delta)$ the result is close to Gaussian, which is
+the lognormal model of Coles & Jones (1991). The shape depends on the
+smoothing scale: averaging over spheres of a few cells lowers the variance
+and pushes the distribution back towards a Gaussian, the central limit
+theorem at work. The laboratory's *PDFs* section compares the distributions
+of all its methods at the grid scale and in top-hat spheres (discs in 2D)
+of ten cells diameter. The sheet, which sums all streams, and the adhesion
+solutions, which collect the same mass into thin walls, populate the
+high-density tail differently, and the Zel'dovich approximation, which
+underestimates the collapse, falls short of the $n$LPT tail.
+
 ## Phases, propagators and the cosmic web
 
 The power spectrum discards the phases, yet the phases carry the cosmic

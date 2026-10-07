@@ -425,3 +425,23 @@ fn hopf_cole_lpt_legendre() {
         if order == 3 { assert!(frac > 0.0 && frac < 0.05); }
     }
 }
+
+#[test]
+fn tophat_smoothing() {
+    use hcc_core::spectra::{bessel_j1, tophat_smooth};
+    // J1 spot checks
+    assert!((bessel_j1(1.0) - 0.4400505857).abs() < 1e-6);
+    assert!((bessel_j1(5.0) + 0.3275791376).abs() < 1e-6);
+    // smoothing a constant leaves it unchanged; smoothing a delta spreads mass over the disc area
+    let mut c = Cosmo::new(2, 128, 1.0);
+    let mut f = vec![0.0f32; 128 * 128];
+    f[64 * 128 + 64] = 1.0;
+    let r_cells = 5.0;
+    let s = tophat_smooth(&c.grid, &mut c.eng, &f, r_cells * c.grid.dx());
+    let total: f64 = s.iter().map(|&v| v as f64).sum();
+    let peak = s[64 * 128 + 64] as f64;
+    let area = std::f64::consts::PI * r_cells * r_cells;
+    println!("tophat: total {total:.4} (expect 1), peak {peak:.4} vs 1/area {:.4}", 1.0 / area);
+    assert!((total - 1.0).abs() < 1e-6);
+    assert!((peak * area - 1.0).abs() < 0.15);
+}

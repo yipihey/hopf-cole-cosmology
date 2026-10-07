@@ -244,3 +244,45 @@ pub fn one_loop(pk: &dyn Fn(f64) -> f64, dim: usize, k: f64, kernels: Kernels, q
     }
     (p22, p13 * pk(k))
 }
+
+// ---------------------------------------------------------------------------
+// Top-hat smoothing (one-point statistics)
+
+/// Bessel J1 (Numerical Recipes rational approximation, |err| < 1e-7).
+pub fn bessel_j1(x: f64) -> f64 {
+    let ax = x.abs();
+    if ax < 8.0 {
+        let y = x * x;
+        let ans1 = x * (72362614232.0 + y * (-7895059235.0 + y * (242396853.1 + y * (-2972611.439 + y * (15704.48260 + y * (-30.16036606))))));
+        let ans2 = 144725228442.0 + y * (2300535178.0 + y * (18583304.74 + y * (99447.43394 + y * (376.9991397 + y * 1.0))));
+        ans1 / ans2
+    } else {
+        let z = 8.0 / ax;
+        let y = z * z;
+        let xx = ax - 2.356194491;
+        let ans1 = 1.0 + y * (0.183105e-2 + y * (-0.3516396496e-4 + y * (0.2457520174e-5 + y * (-0.240337019e-6))));
+        let ans2 = 0.04687499995 + y * (-0.2002690873e-3 + y * (0.8449199096e-5 + y * (-0.88228987e-6 + y * 0.105787412e-6)));
+        let ans = (0.636619772 / ax).sqrt() * (xx.cos() * ans1 - z * xx.sin() * ans2);
+        if x < 0.0 { -ans } else { ans }
+    }
+}
+
+/// Fourier-space window of a top-hat of radius r: disc (2D) or sphere (3D); 1D: box.
+pub fn tophat_window(dim: usize, kr: f64) -> f64 {
+    if kr < 1e-6 { return 1.0; }
+    match dim {
+        1 => kr.sin() / kr,
+        2 => 2.0 * bessel_j1(kr) / kr,
+        _ => 3.0 * (kr.sin() - kr * kr.cos()) / (kr * kr * kr),
+    }
+}
+
+/// Smooth a real field with a top-hat of radius `radius` (box units) via the FFT.
+pub fn tophat_smooth(grid: &Grid, eng: &mut FftEngine, f: &[f32], radius: f64) -> Vec<f32> {
+    let mut h = eng.forward_real_f32(f);
+    for idx in 0..grid.size {
+        let k = grid.k2(idx).sqrt();
+        h[idx] *= tophat_window(grid.dim, k * radius);
+    }
+    eng.inverse_to_real_f32(h)
+}

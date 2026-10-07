@@ -59,6 +59,7 @@ shaders, so even $128^3$ follows the $D$ slider.
 | | GPU compute (3D) | runs positions, CIC deposit, Hopf–Cole and the FFTs on the GPU (WebGPU compute shaders) so that $128^3$ responds live to the $D$ slider |
 | | Fourier | $\log|\hat\delta(\mathbf k)|$ and phase maps of the selected field, $\log|\hat\psi(\mathbf k)|$ |
 | Legendre lab | source potential | Hopf–Cole run on the Zel'dovich potential, on the $n$LPT longitudinal potential (Legendre transform of the $n$LPT map, @sec-legendre), or with the first-order transverse correction; difference maps and spectral ratios against the sheet |
+| PDFs | diameter | one-point distributions of $\log_{10}(1+\delta)$ for every method at the grid scale and in top-hat spheres (discs) of the chosen diameter in cells, with Gaussian and lognormal references and moments |
 | Statistics | $P(k)$ | measured for sheet / CIC / Hopf–Cole / linear, with 1-loop SPT and ZA predictions |
 | | $r(k)$ | cross-correlation with the linear field |
 | | EFT fit | $c_s^2$ from $P_{\rm sheet} - P_{\rm 1\text{-}loop}$ for $k < k_{\max}$ |

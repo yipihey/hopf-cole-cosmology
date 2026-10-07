@@ -228,6 +228,13 @@ impl CosmoSim {
         out.extend(r.iter().map(|v| v[2]));
         out
     }
+    /// Top-hat smoothing (disc in 2D, sphere in 3D) with radius given in grid cells.
+    pub fn tophat_smooth(&mut self, f: &[f32], radius_cells: f64) -> Vec<f32> {
+        let r = radius_cells * self.inner.grid.dx();
+        crate::spectra::tophat_smooth(&self.inner.grid, &mut self.inner.eng, f, r)
+    }
+    /// Window value W(k R) of the top-hat used by `tophat_smooth` (for GPU-side smoothing).
+    pub fn tophat_window(&self, k: f64, radius_cells: f64) -> f64 { crate::spectra::tophat_window(self.inner.grid.dim, k * radius_cells * self.inner.grid.dx()) }
     pub fn kf(&self) -> f64 { self.inner.grid.kf() }
     pub fn knyq(&self) -> f64 { self.inner.grid.knyq() }
 }
