@@ -16,6 +16,8 @@ export class Fields3D {
     this.app = app;
     const S = app.S;
     this.root = el('div', 'lab-fields3d', host);
+    this.volOn = !app.lite;          // lite: the WebGPU volume ray marcher is off by default (slice view); the user can turn it on
+    this.volUser = false;
     const bar = el('div', 'hcc-controls lab-fbar', this.root);
     checkbox(bar, { label: 'slice uses the volume’s colour range', value: S.same, onChange: (v) => { S.same = v; app.hashChanged(); this.updateSlice(); } });
     this.grid = el('div', 'hcc-grid2 lab-grid', this.root);
@@ -49,9 +51,13 @@ export class Fields3D {
     slider(p.opts, { label: 'opacity', min: 0.5, max: 100, value: S.vo, log: true, onInput: (v) => { S.vo = v; app.hashChanged(); this.drawVolume(); } });
     sel(p.opts, { label: 'map', options: CMAPS, value: S.c1, onChange: (v) => { S.c1 = v; app.hashChanged(); this.drawVolume(); } });
     checkbox(p.opts, { label: 'log', value: S.l1, onChange: (v) => { S.l1 = v; app.hashChanged(); app.runPanel(this, 0); } });
+    this.volCb = checkbox(p.opts, { label: 'render volume', value: this.volOn, onChange: (v) => { this.volOn = v; this.volUser = true; app.runPanel(this, 0); } });
+    this.volCb.el.title = 'Volume rendering (ray marching, or three central slices without WebGPU). Off by default in lite mode: use the slice panel.';
+    this.phV = el('p', 'hcc-note lab-hint', p.root, 'Volume rendering is off (lite mode): the slice panel shows the field. Tick “render volume” to draw it anyway.');
+    this.phV.hidden = true;
     const { cv, bar } = this.canvasBlock(p.root);
     this.cvV = cv; this.barV = bar;
-    if (!app.gpu) cv.classList.add('hcc-wide');     // the Canvas2D fallback shows three slices side by side
+    this.syncBackend();
     this.capV = el('p', 'hcc-note lab-cap', p.root);
     this.hintV = el('p', 'hcc-note lab-hint', p.root, 'Drag to rotate, wheel to zoom, double-click to reset (WebGPU). Without WebGPU: three central slices.');
   }
@@ -92,6 +98,11 @@ export class Fields3D {
       this['hover' + slot].textContent = q ? `kx=${q.col - (fv.m >> 1)}, ky=${q.row - (fv.m >> 1)}: ${q.value.toPrecision(4)}` : ' ';
     });
   }
+
+  /** Called once the WebGPU probe has finished: the Canvas2D fallback shows three slices side by side. */
+  syncBackend() { this.cvV.classList.toggle('hcc-wide', !this.app.gpu); }
+  /** The performance preset changed: re-apply the volume default unless the user chose. */
+  syncPerf() { if (!this.volUser) { this.volOn = !this.app.lite; this.volCb.set(this.volOn); } }
 
   /** Reflect S.sa / S.si changed elsewhere (Legendre lab). */
   syncSlice() { const S = this.app.S; this.axSel.set(S.sa); this.idxSl.set(Math.round(S.si * (S.n - 1))); }
@@ -136,6 +147,13 @@ export class Fields3D {
   async updateVolume(P = this.P()) {
     const S = this.app.S, eng = this.app.eng;
     if (!eng.sim) return;
+    const wb = this.cvV.closest('.hcc-with-bar');
+    wb.hidden = !this.volOn; this.phV.hidden = this.volOn; this.hintV.hidden = !this.volOn;
+    if (!this.volOn) {
+      this.capV.textContent = '';
+      this.pv.root.classList.remove('is-stale');
+      return;
+    }
     if (!this.vv) { this.vv = new VolumeView(this.cvV, { cmap: S.c1 }); this.vvInit = this.vv.init(); }
     await this.vvInit;
     await eng.need('field', S.v1, P);
@@ -152,7 +170,7 @@ export class Fields3D {
   }
   drawVolume() {
     const S = this.app.S;
-    if (!this.vv || !this.vv.data) return;
+    if (!this.volOn || !this.vv || !this.vv.data) return;
     this.vv.setColormap(S.c1);
     this.vv.draw({ mode: S.vm, opacity: S.vo });
     const r = this.vv.getRange();

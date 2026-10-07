@@ -12,27 +12,101 @@ export function gpuDisabled() {
 
 let _gpuPromise = null;
 
+// ---- probe status and events (read by the lab's diagnostics / performance logic)
+const _status = { trouble: false, available: false, reason: 'not probed yet', info: null, limits: null, deviceLimits: null, probeMs: 0, lastError: null, lost: null };
+const _listeners = new Set();
+export const GPU_TIMEOUT_MS = 4000;
+
+/** {available, reason, info, limits, deviceLimits, probeMs, lastError, lost, trouble} (trouble: the probe threw or timed out) of the last getGPU() probe (a snapshot). */
+export function gpuStatus() { return { ..._status }; }
+/** Subscribe to {type:'lost'|'error', message, reason} events of the shared device. Returns an unsubscribe function. */
+export function onGpuEvent(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
+function emit(ev) { for (const cb of _listeners) { try { cb(ev); } catch (e) { console.error(e); } } }
+
+/** Test hooks: `?gpufail=1` makes the probe throw, `?gpufail=timeout` makes requestAdapter never resolve. */
+function gpuFailHook() {
+  try { const q = new URLSearchParams(location.search); return q.has('gpufail') ? (q.get('gpufail') || '1') : null; } catch (e) { return null; }
+}
+
+/** Reject after `ms` milliseconds (or resolve with the promise). */
+export function withTimeout(promise, ms, what) {
+  let t;
+  const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error(`${what} timed out after ${(ms / 1000).toFixed(ms % 1000 ? 1 : 0)} s`), { timeout: true })), ms); });
+  return Promise.race([Promise.resolve(promise), timeout]).finally(() => clearTimeout(t));
+}
+
+function copyLimits(lim) {
+  const o = {};
+  if (!lim) return o;
+  for (const k in lim) { const v = lim[k]; if (typeof v === 'number') o[k] = v; }
+  return o;
+}
+function copyInfo(info) {
+  const o = {};
+  if (!info) return o;
+  for (const k of ['vendor', 'architecture', 'device', 'description', 'subgroupMinSize', 'subgroupMaxSize', 'isFallbackAdapter']) if (info[k] !== undefined && info[k] !== '') o[k] = info[k];
+  return o;
+}
+
+async function probeGPU() {
+  const t0 = performance.now();
+  const fail = (reason, extra = {}) => { Object.assign(_status, { available: false, reason, probeMs: performance.now() - t0 }, extra); console.info('[viz] WebGPU unavailable: ' + reason); return null; };
+  if (gpuDisabled()) return fail('disabled by ?nogpu');
+  if (typeof navigator === 'undefined' || !navigator.gpu) return fail('navigator.gpu is missing (browser without WebGPU)');
+  const hook = gpuFailHook();
+  const deadline = t0 + GPU_TIMEOUT_MS;
+  const left = () => Math.max(50, deadline - performance.now());
+  let adapter = null, err = null;
+  try {
+    if (hook === 'timeout') await withTimeout(new Promise(() => {}), GPU_TIMEOUT_MS, 'requestAdapter');
+    if (hook) throw new Error('simulated GPU failure (?gpufail=' + hook + ')');
+    try { adapter = await withTimeout(navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }), left(), 'requestAdapter'); }
+    catch (e) { if (e.timeout) throw e; err = e; }
+    if (!adapter) {
+      adapter = await withTimeout(navigator.gpu.requestAdapter(), left(), 'requestAdapter');
+    }
+    if (!adapter) return fail('requestAdapter returned null (no usable GPU adapter)' + (err ? ': ' + err.message : ''));
+    let info = adapter.info || null;
+    if (!info && typeof adapter.requestAdapterInfo === 'function') {
+      try { info = await withTimeout(adapter.requestAdapterInfo(), 1000, 'requestAdapterInfo'); } catch (e) { info = null; }
+    }
+    const infoC = copyInfo(info);
+    if (infoC.isFallbackAdapter === undefined && adapter.isFallbackAdapter !== undefined) infoC.isFallbackAdapter = adapter.isFallbackAdapter;
+    const limits = copyLimits(adapter.limits);
+    _status.info = infoC; _status.limits = limits;
+    let device;
+    const lateDestroy = (p) => p.then((d) => { try { d.destroy(); } catch (e) { /* ignore */ } }, () => {});
+    const dp = adapter.requestDevice();
+    try { device = await withTimeout(dp, left() + 1000, 'requestDevice'); }
+    catch (e) { lateDestroy(dp); throw e; }
+    device.lost.then((l) => {
+      const msg = `${l.reason || 'lost'}: ${l.message || ''}`.trim();
+      console.warn('[viz] WebGPU device lost:', msg);
+      Object.assign(_status, { available: false, reason: 'device lost (' + msg + ')', lost: msg });
+      _gpuPromise = Promise.resolve(null);          // later users (new views) get the Canvas2D fallbacks
+      emit({ type: 'lost', message: msg, reason: l.reason });
+    });
+    device.addEventListener('uncapturederror', (ev) => {
+      const m = (ev.error && ev.error.message) || String(ev.error);
+      console.error('[viz] WebGPU error:', m);
+      _status.lastError = m;
+      emit({ type: 'error', message: m, kind: ev.error && ev.error.constructor && ev.error.constructor.name });
+    });
+    const format = navigator.gpu.getPreferredCanvasFormat();      // only after an adapter exists
+    Object.assign(_status, { available: true, reason: 'ok', deviceLimits: copyLimits(device.limits), probeMs: performance.now() - t0 });
+    return { adapter, device, format, info: infoC, limits };
+  } catch (e) {
+    console.warn('[viz] WebGPU init failed; using Canvas2D:', e);
+    return fail((e && e.message) || String(e), { lastError: (e && e.message) || String(e), trouble: true });
+  }
+}
+
 /**
- * Resolve to {adapter, device, format} or null when WebGPU is unavailable /
- * disabled / the adapter or device request fails. Memoized.
+ * Resolve to {adapter, device, format, info, limits} or null when WebGPU is unavailable / disabled / the adapter or
+ * device request fails or takes longer than 4 s. Never rejects. Memoized. See gpuStatus() for the reason.
  */
 export function getGPU() {
-  if (_gpuPromise) return _gpuPromise;
-  _gpuPromise = (async () => {
-    if (gpuDisabled()) { console.info('[viz] WebGPU disabled by ?nogpu'); return null; }
-    if (typeof navigator === 'undefined' || !navigator.gpu) { console.info('[viz] navigator.gpu missing; using Canvas2D'); return null; }
-    try {
-      const adapter = await navigator.gpu.requestAdapter();
-      if (!adapter) { console.info('[viz] no WebGPU adapter; using Canvas2D'); return null; }
-      const device = await adapter.requestDevice();
-      device.lost.then((info) => { console.warn('[viz] WebGPU device lost:', info.message); _gpuPromise = null; });
-      device.addEventListener('uncapturederror', (ev) => console.error('[viz] WebGPU error:', ev.error && ev.error.message));
-      return { adapter, device, format: navigator.gpu.getPreferredCanvasFormat() };
-    } catch (e) {
-      console.warn('[viz] WebGPU init failed; using Canvas2D:', e);
-      return null;
-    }
-  })();
+  if (!_gpuPromise) _gpuPromise = probeGPU();
   return _gpuPromise;
 }
 

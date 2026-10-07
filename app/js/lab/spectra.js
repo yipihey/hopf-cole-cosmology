@@ -91,6 +91,9 @@ export class Spectra {
     if (w.has('cic')) t.push({ label: 'P(k) CIC', fn: async () => { await e.need('analysis', 'cic', P); e.pk('cic', P, true); } });
     if (w.has('hc')) t.push({ label: 'P(k) Hopf–Cole', fn: async () => { await e.need('analysis', 'hc', P); e.pk('hc', P); } });
     t.push({ label: 'r(k)', fn: async () => { await e.need('analysis', prim, P); await e.need('analysis', 'hc', P); e.rk(prim, P); e.rk('hc', P); e.sigmaV2(); } });
+    const loops = gaussian && (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13') || w.has('za'));
+    // lite: show the measured spectra first, the 1-loop curves (0.3 s in WASM) follow in a second drawing; only when this section is visible
+    if (this.app.lite && loops && this.app.visible('s') && !e.peek(['loop1', 0])) t.push({ label: 'plots (1-loop follows)', fn: () => this.draw(P, true) });
     if (gaussian && (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13'))) {
       t.push({ label: 'SPT 1-loop', heavy: true, fn: () => e.loop(P, 0) });
     }
@@ -101,7 +104,7 @@ export class Spectra {
 
   drawIfReady() { if (this.app.eng.sim && this.lastP) this.draw(this.lastP); }
 
-  draw(P) {
+  draw(P, noLoop = false) {
     const e = this.app.eng, S = this.app.S, w = this.wants();
     this.lastP = P;
     const dim = e.dim, prim = dim === 2 ? 'sheet' : 'cic';
@@ -125,7 +128,7 @@ export class Spectra {
     if (w.has('hc')) { const s = e.pk('hc', P); series.push({ x: s.k, y: s.p, label: 'Hopf–Cole' + hcTag, color: PALETTE[1], points: true, width: 1.2, radius: 2 }); }
 
     let cs2 = null, fitNote = '';
-    const spt = e.gaussian ? (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13') ? e.loop(P, 0) : null) : null;
+    const spt = e.gaussian && !noLoop ? (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13') ? e.loop(P, 0) : null) : null;
     if (spt) {
       const tot = Float64Array.from(spt.k, (_, i) => spt.plin[i] + spt.p22[i] + spt.p13[i]);
       if (w.has('spt')) series.push({ x: spt.k, y: tot, label: '1-loop SPT', color: PALETTE[2], width: 1.8 });
@@ -141,7 +144,7 @@ export class Spectra {
         series.push({ x: spt.k, y: eft, label: `EFT fit (c_s²=${fmtNum(cs2, 2)})`, color: PALETTE[4], width: 2.2 });
       }
     }
-    if (e.gaussian && w.has('za')) {
+    if (e.gaussian && !noLoop && w.has('za')) {
       const za = e.loop(P, 1);
       series.push({ x: za.k, y: Float64Array.from(za.k, (_, i) => za.plin[i] + za.p22[i] + za.p13[i]), label: '1-loop Zel’dovich', color: PALETTE[3], width: 1.6 });
     }

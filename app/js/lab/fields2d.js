@@ -228,6 +228,9 @@ export class Fields2D {
   /** Reflect S.rmin / S.rmax / S.same changed elsewhere (Legendre lab). */
   syncRange() { this.rmin.set(this.app.S.rmin); this.rmax.set(this.app.S.rmax); this.sameCb.set(this.app.S.same); }
   redrawAll() { this.slots.forEach((s, i) => this.app.runPanel(this, i)); }
+  /** WebGPU probe finished / device lost: the GPU-only panel kinds change their sub-selectors. */
+  syncBackend() { this.slots.forEach((s) => s.syncControls()); }
+  syncPerf() { this.slots.forEach((s) => s.syncControls()); }
   markStale(b, keepFast = false) { this.slots.forEach((s) => s.markStale(b && !(keepFast && s.isFast()))); }
   fastUpdate(P) { let any = false; for (const s of this.slots) any = s.fastUpdate(P) || any; return any; }
   tasks(P, hcOnly = false) {

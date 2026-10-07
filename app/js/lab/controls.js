@@ -3,8 +3,14 @@
 import { slider, checkbox, button } from '../viz/ui.js';
 import { el, sel, numIn, fmtNum } from './dom.js';
 import { GRID_2D, GRID_3D, OMEGA_M } from './state.js';
+import { LITE_GRID_2D, LITE_GRID_3D } from './perf.js';
 
-const gridOptions = (mode) => (mode === 3 ? GRID_3D : GRID_2D).map((n) => [n, mode === 3 ? `${n}³` : `${n}²`]);
+/** Grid choices; lite mode offers {128, 256} in 2D and {32, 48, 64} in 3D (plus an explicitly requested current size). */
+const gridOptions = (mode, app) => {
+  let g = mode === 3 ? GRID_3D : GRID_2D;
+  if (app.lite) { const keep = mode === 3 ? LITE_GRID_3D : LITE_GRID_2D; g = g.filter((n) => keep.includes(n) || n === app.S.n); }
+  return g.map((n) => [n, mode === 3 ? `${n}³` : `${n}²`]);
+};
 const methodOptions = (mode) => (mode === 3
   ? [[0, 'Fourier multiplier'], [1, 'log-domain ×1']]
   : [[0, 'Fourier multiplier'], [1, 'log-domain ×1'], [2, 'log-domain ×2'], [4, 'log-domain ×4']]);
@@ -31,7 +37,11 @@ export function buildControls(app, host) {
     r.addEventListener('change', () => { if (r.checked) app.setMode(m); });
     return r;
   });
-  C.n = sel(gm, { label: 'grid N', options: gridOptions(S.mode), value: S.n, onChange: (v) => app.setParam('n', Number(v), 'ic') });
+  C.perf = sel(gm, { label: 'Performance', options: [['auto', 'auto (decide from the GPU)'], ['lite', 'lite (weak / integrated GPU)'], ['full', 'full']], value: S.perf,
+    title: 'Lite: 2D grid 128² by default (256² allowed), 3D grids up to 64³, GPU compute off by default, CPU-rasterized 2D sheet, 3D volume panel off (slice view), live update with a 250 ms debounce. Auto picks lite when WebGPU is unavailable or the adapter looks weak (see Diagnostics).',
+    onChange: (v) => app.setPerf(v) });
+  C.perfNote = el('p', 'lab-note-line', gm, 'performance: probing …');
+  C.n = sel(gm, { label: 'grid N', options: gridOptions(S.mode, app), value: S.n, onChange: (v) => app.setParam('n', Number(v), 'ic') });
   C.gc = checkbox(gm, { label: 'GPU compute', value: S.gc && app.gpuCompute, onChange: (v) => app.setGpuCompute(v) });
   C.gc.el.title = 'WebGPU compute path for the 3D mode: after the initial-condition draw everything runs in compute shaders (single precision): the nLPT term build, shell-crossing search, CIC and tetrahedral-sheet deposits, Hopf–Cole log-sum-exp, Legendre inversion with the transverse correction, FFT spectra and Fourier maps. Off: WASM (double precision, seconds at 128³).';
   C.gcNote = el('p', 'lab-note-line', gm, 'GPU path: f32 arithmetic; the LPT terms are built on the GPU once per IC and order increase (about 0.2 s at 128³, 4LPT), so changing the order, Ωm, D or ν only recomputes cheap fields. CIC and sheet use 18-bit fixed-point atomics (a cell overflows at ρ/ρ̄ ≥ 16384).');
@@ -108,6 +118,24 @@ export function buildControls(app, host) {
   C.run = button(runRow, { label: 'Run', onClick: () => app.runNow() });
   C.run.el.classList.add('lab-run');
 
+  // ---------------------------------------------------------------- diagnostics
+  const gx = group(host, 'Diagnostics', false);
+  C.diagPre = el('pre', 'lab-diag', gx, 'probing …');
+  const dRow = el('div', 'hcc-row', gx);
+  C.diagCopy = button(dRow, { label: 'copy diagnostics', onClick: () => {
+    const text = C.diagPre.textContent;
+    const done = (ok) => { C.diagCopy.setLabel(ok ? 'copied' : 'copy failed (select the text)'); setTimeout(() => C.diagCopy.setLabel('copy diagnostics'), 1800); };
+    const fallback = () => {
+      try {
+        const ta = el('textarea', null, document.body); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0'; ta.select();
+        const ok = document.execCommand('copy'); ta.remove(); done(ok);
+      } catch (e) { done(false); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), fallback); else fallback();
+  } });
+  C.setDiag = (text) => { C.diagPre.textContent = text; };
+  C.setPerfNote = (text) => { C.perfNote.textContent = text; };
+
   // ---------------------------------------------------------------- helpers
   C.syncVisibility = () => {
     const ic = S.ic;
@@ -136,7 +164,8 @@ export function buildControls(app, host) {
   /** Reflect state S into all widgets (after a mode switch or hash restore). */
   C.syncAll = () => {
     C.modeRadios.forEach((r) => { r.checked = Number(r.value) === S.mode; });
-    C.n.setOptions(gridOptions(S.mode), S.n);
+    C.perf.set(S.perf);
+    C.n.setOptions(gridOptions(S.mode, app), S.n);
     C.me.setOptions(methodOptions(S.mode), S.me);
     C.ic.set(S.ic); C.shape.set(S.shape);
     C.pn.set(S.pn); C.ns.set(S.ns); C.gm.set(S.gm); C.seed.set(S.seed);

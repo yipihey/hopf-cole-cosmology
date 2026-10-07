@@ -8,6 +8,8 @@ import { GpuCosmo3D } from '../gpu/cosmo3d.js';
 import { GpuLpt3D } from '../gpu/lpt3d.js';
 import { GpuSheet3D } from '../gpu/sheet3d.js';
 import { getUnmergedSpec } from '../gpu/terms.js';
+import { gpu3dRefusal } from './perf.js';
+import { ENV } from './state.js';
 
 const MAX_CACHE_BYTES = 420e6;
 
@@ -45,7 +47,7 @@ export class Engine {
     this.gFresh = {};             // field name -> memo key of the field currently resident in the GPU scratch buffers
     this.gPhiKey = null;          // which Legendre source the GPU 'phi-eff' buffer holds: 'lpt<order>|<D>' (see gpuLegendre)
     this.ref = null;              // GPU-side reference spectra of delta0 (cross spectra, linear theory)
-    this.gpuError = null; this.gpuFailed = false; this.gpuWanted = undefined;
+    this.gpuError = null; this.gpuFailed = false; this.gpuRefused = false; this.gpuWanted = undefined;
     this.om = 1;                   // cosmology currently set on the sim (Omega_m)
     this.gq = Promise.resolve();   // serialises GPU work: the scratch buffers hold one field at a time
     this.lastPath = 'WASM';
@@ -323,6 +325,9 @@ export class Engine {
     if (!this.gpuActive(P) || !this.sim) { this.lastPath = 'WASM'; return false; }
     const gen = this.gen;
     try {
+      // memory safety: refuse (-> WASM, with a message) before any GPU buffer is created
+      const refusal = gpu3dRefusal(this.gpuDev, this.n, P.order, ENV.lite);
+      if (refusal) throw Object.assign(new Error(refusal), { refusal: true });
       if (!this.g || this.g.n !== this.n) {
         this.releaseGpu();
         await this.timeAsync('GPU init', async () => {
@@ -481,8 +486,9 @@ export class Engine {
   }
 
   gpuFailure(err) {
-    console.error('[engine] GPU compute path failed, falling back to WASM:', err);
+    (err && err.refusal ? console.warn : console.error)('[engine] GPU compute path failed, falling back to WASM:', err);
     this.gpuError = (err && err.message) || String(err);
+    this.gpuRefused = !!(err && err.refusal);       // a planned memory-safety fallback, not a malfunction
     this.gpuFailed = true;
     this.lastPath = 'WASM';
     this.releaseGpu();

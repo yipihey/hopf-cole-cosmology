@@ -126,3 +126,15 @@ html { color-scheme: light dark; }
 .lab-leg-grid { grid-template-columns: repeat(auto-fit, minmax(max(14rem, 32%), 1fr)); }
 .lab-leg-grid2 { grid-template-columns: repeat(auto-fit, minmax(max(14rem, 49%), 1fr)); }
 .lab-legendre .hcc-readout.lab-bad .hcc-value { color: var(--lab-bad); }
+
+/* performance presets, diagnostics and the GPU-trouble banner */
+.lab-panel [hidden] { display: none !important; }
+.lab-diag { margin: 0.2rem 0; padding: 0.35rem 0.45rem; max-height: 22rem; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font: 0.7rem/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; border: 1px solid var(--hcc-border); border-radius: 4px; background: var(--lab-bg2); }
+.lab-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.9rem; margin: 0 0 0.5rem; padding: 0.4rem 0.7rem;
+  border: 1px solid var(--lab-bad); border-radius: var(--hcc-radius); background: color-mix(in srgb, var(--lab-bad) 10%, transparent); font-size: 0.85rem; }
+.lab-banner[hidden] { display: none; }
+.lab-banner .lab-banner-msg { font-weight: 600; }
+.lab-banner .lab-banner-detail { flex: 1 1 100%; font-size: 0.75rem; color: var(--hcc-muted); }
+.lab-banner a, .lab-banner button { cursor: pointer; font: inherit; }
+.lab-banner button.lab-banner-x { margin-left: auto; border: 0; background: transparent; color: inherit; font-size: 1.1rem; line-height: 1; }

@@ -6,9 +6,10 @@
 // older chain at the next task boundary. Results are memoised in the Engine,
 // so toggling panels or series never recomputes anything that is cached.
 
-import { getGPU } from '../viz/gpu.js';
+import { getGPU, gpuStatus, onGpuEvent } from '../viz/gpu.js';
 import { Engine } from './engine.js';
-import { decodeHash, encodeHash, defaultN, defaultLive, ENV } from './state.js';
+import { decodeHash, encodeHash, defaultN, defaultLive, makeDefaults, ENV } from './state.js';
+import { queryFlags, decidePerf, runBench, diagnosticsText } from './perf.js';
 import { buildControls } from './controls.js';
 import { Fields2D } from './fields2d.js';
 import { Fields3D } from './fields3d.js';
@@ -19,10 +20,21 @@ import { el, tick, paint, fmtMs } from './dom.js';
 
 const $ = (id) => document.getElementById(id);
 
+const GPU_ERR_RE = /WebGPU|GPU|device lost|out of memory|allocation/i;
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
 export class Lab {
-  constructor(core) {
+  /** The WASM core is attached later (start() receives its promise), so the page can render before it has loaded. */
+  constructor(core = null) {
     this.core = core;
+    this.flags = queryFlags();
+    const hq = new URLSearchParams(location.hash.replace(/^#/, ''));
+    // keys given explicitly in the URL hash are never overridden by the performance presets
+    this.explicit = new Set(['n', 'gc', 'lv', 'f'].filter((k) => hq.has(k)));
+    this.lite = decidePerf(this.flags.lite ? 'lite' : (hq.get('perf') || 'auto'), this.flags, null, null).lite;   // provisional: sync facts only
+    ENV.lite = this.lite;
     this.S = decodeHash(location.hash);
+    if (this.flags.lite) this.S.perf = 'lite';
     this.P = structuredClone(this.S);
     this.eng = new Engine(core);
     this.runGen = 0;
@@ -30,23 +42,23 @@ export class Lab {
     this.dirty = false;
     this.fields = null; this.fieldsMode = 0; this.fieldsN = 0;
     this.spectra = null; this.legendre = null;
+    this.gpu = false; this.gpuCompute = false; this.backend = 'canvas2d';
+    this.bench = null; this.decision = null; this.firstRunDone = false; this.lastError = null; this.wasmExports = null;
     window.addEventListener('hashchange', () => { if (location.hash.replace(/^#/, '') !== encodeHash(this.S)) location.reload(); });
   }
 
-  async start() {
-    const gpu = await getGPU();
-    this.gpu = !!gpu;
-    this.backend = this.gpu ? 'webgpu' : 'canvas2d';
-    // WebGPU compute path (3D): needs the shared device; default 'live update' depends on it
-    this.gpuCompute = !!gpu;
-    ENV.gpuCompute = this.gpuCompute;
-    this.eng.gpuDev = gpu ? gpu.device : null;
-    if (!new URLSearchParams(location.hash.replace(/^#/, '')).has('lv')) { this.S.live = defaultLive(this.S.mode, this.S.gc); this.P.live = this.S.live; }
-    if (new URLSearchParams(location.search).has('embed')) document.body.classList.add('embed');
+  /**
+   * Start-up order: controls, status line and panels first (the page is usable at once), then the WASM core and the GPU probe in
+   * parallel (the probe is capped at 4 s and never rejects), then the performance decision, then the first run under a 20 s watchdog.
+   */
+  async start(corePromise = null) {
     this.statusEl = $('lab-status-text');
     this.timingEl = $('lab-status-timing');
-    $('lab-status-backend').textContent = `backend: ${this.backend}`;
-
+    this.t0 = performance.now();
+    if (new URLSearchParams(location.search).has('embed')) document.body.classList.add('embed');
+    this.setStatus('building controls …', 'busy');
+    this.setBackendBadge('probing …');
+    if (!this.explicit.has('lv')) { this.S.live = defaultLive(this.S.mode, this.S.gc); this.P.live = this.S.live; }
     this.controls = buildControls(this, $('lab-controls'));
     this.buildVisChips();
     this.spectra = new Spectra(this, $('spectra-host'));
@@ -55,7 +67,196 @@ export class Lab {
     this.applyVisibility();
     this.ensureFields(this.S);
     window.__lab = this;       // debugging / tests
-    await this.run();
+    this.controls.setPerfNote('performance: probing …');
+    this.updateDiagnostics();
+    this.tControls = performance.now() - this.t0;
+    await paint();
+
+    // WASM core and GPU probe in parallel, with a progress text
+    let coreDone = !corePromise, gpuDone = false;
+    const progress = () => this.setStatus(`${coreDone ? '' : 'loading WebAssembly core … '}${gpuDone ? '' : (coreDone ? '' : '· ') + 'probing GPU …'}`.trim(), 'busy');
+    progress();
+    const coreP = corePromise ? corePromise.then((c) => { coreDone = true; progress(); return c; }) : Promise.resolve(this.core);
+    const gpuP = this.probeGpu().then(() => { gpuDone = true; progress(); });
+    const core = await coreP;                   // a load failure propagates to main.js (fatal)
+    await gpuP;
+    this.core = core; this.eng.core = core;
+    try { this.wasmExports = await core.default(); } catch (e) { this.wasmExports = null; }   // already initialised: returns the exports
+
+    // performance decision
+    const dec = decidePerf(this.S.perf, this.flags, gpuStatus(), this.bench);
+    this.applyPerf(dec);
+    this.controls.syncAll();
+    if (this.fields.syncBackend) this.fields.syncBackend();
+    this.tProbe = performance.now() - this.t0;
+    const gst = gpuStatus();
+    if (gst.trouble) this.showBanner(`WebGPU could not be initialised (${gst.reason}); continuing on Canvas2D / WASM.`);
+    this.setStatus(`performance: ${this.lite ? 'lite' : 'full'} (${dec.reason}) · first run …`, 'busy');
+    this.updateDiagnostics();
+    await paint();
+
+    this.watchdog = setTimeout(() => {
+      if (!this.firstRunDone) this.showBanner('The first run has not finished within 20 s.');
+    }, 20000);
+    try { await this.run(); } catch (e) { this.reportError('first run', e); this.showBanner('The first run failed: ' + ((e && e.message) || e)); }
+    this.tFirstRun = performance.now() - this.t0;
+    this.updateDiagnostics();
+  }
+
+  // ---------------------------------------------------------------- GPU probe, performance presets, diagnostics
+
+  /** Acquire the shared GPU (4 s cap, never rejects) and run the micro-benchmark. */
+  async probeGpu() {
+    let gpu = null;
+    try { gpu = await getGPU(); } catch (e) { gpu = null; }
+    this.gpuObj = gpu;
+    this.gpu = !!gpu;
+    this.backend = this.gpu ? 'webgpu' : 'canvas2d';
+    // WebGPU compute path (3D): needs the shared device; default 'live update' depends on it
+    this.gpuCompute = !!gpu;
+    ENV.gpuCompute = this.gpuCompute;
+    this.eng.gpuDev = gpu ? gpu.device : null;
+    if (gpu) {
+      this.offGpu = onGpuEvent((ev) => this.onGpuEvent(ev));
+      this.bench = await runBench(gpu.device, this.flags);
+    }
+    if (!this.explicit.has('lv')) { this.S.live = defaultLive(this.S.mode, this.S.gc); this.P.live = this.S.live; }
+    this.setBackendBadge();
+    return gpu;
+  }
+
+  setBackendBadge(text) {
+    const b = $('lab-status-backend');
+    if (!b) return;
+    b.textContent = text ? `backend: ${text}` : `backend: ${this.backend} · ${this.lite ? 'lite' : 'full'}`;
+    b.title = this.decision ? `performance preset ${this.lite ? 'lite' : 'full'}: ${this.decision.reason}` : 'graphics backend and performance preset';
+  }
+
+  /**
+   * Make `dec` the active preset. Re-applies the lite/full defaults (2D grid, GPU compute, 2D sheet panel, live update, 3D volume panel)
+   * except for values given explicitly in the URL hash (or set by hand since).
+   */
+  applyPerf(dec) {
+    const S = this.S, was = this.lite;
+    const old = makeDefaults(S.mode);                   // defaults of the previous preset
+    this.lite = dec.lite; this.decision = dec; ENV.lite = dec.lite;
+    const nu = makeDefaults(S.mode);
+    if (was !== this.lite) {
+      if (!this.explicit.has('n') && S.n === old.n) S.n = nu.n;
+      if (!this.explicit.has('gc')) S.gc = nu.gc;
+      if (!this.explicit.has('f')) S.slots = S.slots.map((q, i) => (same(q, old.slots[i]) ? nu.slots[i] : q));
+    }
+    if (!this.explicit.has('lv')) S.live = defaultLive(S.mode, S.gc);
+    if (this.controls) {
+      this.controls.setPerfNote(`${S.perf} → ${this.lite ? 'lite' : 'full'}: ${dec.reason}`);
+      if (this.fields && this.fields.syncPerf) this.fields.syncPerf();
+    }
+    this.setBackendBadge();
+    this.hashChanged();
+    return was !== this.lite;
+  }
+
+  /** The Performance select. A user choice overrides ?lite=1. */
+  setPerf(pref) {
+    const S = this.S;
+    S.perf = pref;
+    const dec = decidePerf(pref, { ...this.flags, lite: false }, gpuStatus(), this.bench);
+    const changed = this.applyPerf(dec);
+    this.controls.syncAll();
+    this.updateDiagnostics();
+    if (!changed) { this.setStatus(`performance: ${this.lite ? 'lite' : 'full'} (${dec.reason})`); return; }
+    this.eng.releaseGpu();
+    this.invalidate();
+    this.appliedKey = null;
+    this.markStale(true);
+    this.ensureFields(S);
+    this.controls.syncVisibility();
+    if (S.live) { this.setStatus(`performance: ${this.lite ? 'lite' : 'full'} (${dec.reason}) · recomputing …`, 'busy'); this.schedule(30); }
+    else { this.setDirty(true); this.setStatus(`performance: ${this.lite ? 'lite' : 'full'} (${dec.reason}); press Run to apply the new defaults.`); }
+  }
+
+  /** Debounce: lite waits at least 250 ms after the last change. */
+  lag(ms) { return this.lite ? Math.max(ms, 250) : ms; }
+
+  updateDiagnostics() {
+    if (!this.controls || !this.controls.setDiag) return;
+    const mem = this.wasmExports && this.wasmExports.memory ? this.wasmExports.memory.buffer.byteLength : null;
+    const t = [];
+    if (this.tControls !== undefined) t.push(`controls ${this.tControls.toFixed(0)} ms`);
+    if (this.tProbe !== undefined) t.push(`WASM + GPU probe done ${this.tProbe.toFixed(0)} ms`);
+    if (this.tFirstRun !== undefined) t.push(`first run done ${this.tFirstRun.toFixed(0)} ms`);
+    this.controls.setDiag(diagnosticsText({
+      gpu: gpuStatus(), bench: this.bench, decision: this.decision, backend: this.backend, lite: this.lite, pref: this.S.perf,
+      wasmBytes: mem, lastError: this.lastError || this.lastErrorSticky, startupMs: t.join(', '),
+    }));
+  }
+
+  // ---------------------------------------------------------------- trouble banner and recovery
+
+  /** Non-blocking banner at the top of the main area. */
+  showBanner(detail) {
+    const b = $('lab-banner');
+    if (!b) return;
+    b.textContent = '';
+    el('span', 'lab-banner-msg', b, 'The lab is having trouble with this GPU.');
+    if (!this.lite) {
+      const a = el('a', null, b, '[Switch to lite mode]'); a.href = '#';
+      a.addEventListener('click', (ev) => { ev.preventDefault(); this.hideBanner(); this.controls.perf.set('lite'); this.setPerf('lite'); });
+    }
+    if (this.gpu) {
+      const r = el('a', null, b, '[Reload without WebGPU]');
+      const u = new URL(location.href); u.searchParams.set('nogpu', '1'); u.searchParams.delete('gpufail');
+      const h = encodeHash(this.S); u.hash = h ? '#' + h : '';
+      r.href = u.toString();
+    }
+    const x = el('button', 'lab-banner-x', b, '×'); x.type = 'button'; x.title = 'dismiss'; x.addEventListener('click', () => this.hideBanner());
+    if (detail) el('span', 'lab-banner-detail', b, detail);
+    b.hidden = false;
+    this.lastErrorSticky = detail;
+    this.updateDiagnostics();
+  }
+  hideBanner() { const b = $('lab-banner'); if (b) b.hidden = true; }
+
+  onGpuEvent(ev) {
+    if (ev.type === 'lost') { this.handleDeviceLost(ev); return; }
+    if (ev.type === 'error') {
+      this.updateDiagnostics();
+      if (/out of memory|OutOfMemory|OOM|allocation/i.test(`${ev.kind} ${ev.message}`)) this.showBanner('GPU error: ' + ev.message);
+    }
+  }
+
+  /** The GPU device was lost: continue on Canvas2D / WASM immediately, without throwing. */
+  handleDeviceLost(ev) {
+    console.warn('[lab] GPU device lost; falling back to Canvas2D/WASM:', ev.message);
+    this.gpu = false; this.gpuCompute = false; ENV.gpuCompute = false; this.backend = 'canvas2d';
+    this.eng.gpuDev = null;
+    try { this.eng.releaseGpu(); } catch (e) { /* the device is gone */ }
+    this.eng.gpuWanted = false;
+    const dec = decidePerf(this.S.perf, { ...this.flags, lite: false }, gpuStatus(), this.bench);
+    this.applyPerf(dec);
+    // the views hold the dead device: rebuild the panels (their canvases get the Canvas2D fallbacks)
+    try {
+      if (this.fields) { this.fields.destroy(); this.fields = null; this.fieldsMode = 0; }
+      if (this.legendre) { this.legendre.destroy(); this.legendre = new LegendreLab(this, $('legendre-host')); }
+      this.ensureFields(this.S);
+    } catch (e) { console.error(e); }
+    this.setBackendBadge();
+    this.controls.syncAll();
+    this.showBanner('GPU device lost (' + ev.message + '); continuing on Canvas2D / WASM.');
+    this.setStatus('GPU device lost: continuing on Canvas2D / WASM', 'err');
+    this.invalidate();
+    this.appliedKey = null;
+    this.markStale(true);
+    if (this.eng.sim) {
+      if (this.S.live) this.schedule(100); else this.setDirty(true);
+    }
+  }
+
+  /** Real (not memory-refusal) failure of the GPU compute path: it has fallen back to WASM; switch the checkbox off. */
+  onGpuComputeFailed() {
+    const S = this.S;
+    if (S.gc) { S.gc = false; S.live = defaultLive(S.mode, false); this.hashChanged(); this.controls.syncAll(); }
+    this.showBanner('GPU compute path failed: ' + this.eng.gpuError);
   }
 
   // ---------------------------------------------------------------- state plumbing
@@ -78,15 +279,18 @@ export class Lab {
     console.error(`[lab] ${label}:`, err);
     this.lastError = `error in ${label}: ${err && err.message ? err.message : err}`;
     this.setStatus(this.lastError, 'err');
+    if (GPU_ERR_RE.test(String(err && err.message ? err.message : err))) this.showBanner(this.lastError);
+    else this.updateDiagnostics();
   }
 
   /** Called by controls for every changed parameter. */
   setParam(key, value, level) {
     const S = this.S;
     S[key] = value;
+    if (key === 'n' || key === 'live') this.explicit.add(key === 'n' ? 'n' : 'lv');   // set by hand: presets leave it alone
     this.hashChanged();
     if (level === 'live') {
-      if (value) this.schedule(60);
+      if (value) this.schedule(this.lag(60));
       else this.setDirty(false);
       return;
     }
@@ -109,10 +313,10 @@ export class Lab {
     if (level === 'dyn') {
       this.markStale(true, true);
       this.fastD();
-      this.schedule(170);
+      this.schedule(this.lag(170));
     } else {
       this.markStale(true);
-      this.schedule(level === 'ic' ? 70 : 110);
+      this.schedule(this.lag(level === 'ic' ? 70 : 110));
     }
   }
 
@@ -120,6 +324,7 @@ export class Lab {
   setGpuCompute(v) {
     const S = this.S;
     S.gc = v;
+    this.explicit.add('gc');
     S.live = defaultLive(S.mode, v);
     this.hashChanged();
     this.controls.syncAll();
@@ -184,7 +389,7 @@ export class Lab {
 
   scheduleHc() {
     clearTimeout(this.timers.hc);
-    this.timers.hc = setTimeout(() => this.runHc(), this.S.mode === 3 ? 40 : 80);
+    this.timers.hc = setTimeout(() => this.runHc(), this.lag(this.S.mode === 3 ? 40 : 80));
   }
 
   /**
@@ -263,8 +468,10 @@ export class Lab {
       document.body.classList.add('lab-working');
       await (t.heavy ? paint() : tick());
       if (gen !== this.runGen) return false;
+      const tt = performance.now();
       try {
         await t.fn();
+        (this.taskLog || (this.taskLog = [])).push([t.label, Math.round(performance.now() - tt)]); if (this.taskLog.length > 200) this.taskLog.shift();
       } catch (err) {
         this.reportError(t.label, err);
         if (t.critical) { document.body.classList.remove('lab-working'); return false; }
@@ -274,8 +481,17 @@ export class Lab {
     return true;
   }
 
-  /** Full (re)computation for the current control state. */
+  /** Full (re)computation for the current control state. Never throws: unexpected errors are reported (and GPU-related ones raise the banner). */
   async run() {
+    try { await this._run(); }
+    catch (err) {
+      this.reportError('run', err);
+      document.body.classList.remove('lab-working');
+      this.firstRunDone = true;
+    }
+  }
+
+  async _run() {
     clearTimeout(this.timers.run);
     const gen = ++this.runGen;
     const S = this.S;
@@ -310,7 +526,12 @@ export class Lab {
 
     const ok = await this.runTasks(tasks, gen);
     if (gen !== this.runGen) return;
+    if (!this.firstRunDone) {
+      this.firstRunDone = true; clearTimeout(this.watchdog);
+      if (!ok && this.lastError) this.showBanner('The first run failed: ' + this.lastError);
+    }
     this.refreshReadouts();
+    if (P.mode === 3 && this.eng.gpuError && !this.eng.gpuRefused) this.onGpuComputeFailed();
     if (ok && !this.lastError) this.appliedKey = this.coreKey(P);
     if (this.lastError) this.setStatus(this.lastError, 'err');
     else if (ok) {
@@ -318,6 +539,7 @@ export class Lab {
       this.setStatus(`ready · ${P.mode}D ${P.n}${P.mode === 2 ? '²' : '³'} · order ${P.order} · D = ${P.D.toFixed(3)}${path ? ' · ' + path : ''} · ${fmtMs(performance.now() - t0)}`, this.eng.gpuError && P.mode === 3 ? 'err' : '');
     }
     this.showTimings();
+    this.updateDiagnostics();
   }
 
   /** Compute only the tasks of one section (when it is switched on). */

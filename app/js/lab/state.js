@@ -13,9 +13,9 @@ export const SLOT_KINDS = [
   'sheetgpu', 'sheetcpu', 'cic', 'hc', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed',
 ];
 
-export function defaultN(mode) { return mode === 3 ? 64 : 256; }
+export function defaultN(mode) { return mode === 3 ? 64 : (ENV.lite ? 128 : 256); }
 /** Runtime environment, set once by the app after the WebGPU probe. */
-export const ENV = { gpuCompute: false };
+export const ENV = { gpuCompute: false, lite: false };
 /** Live update is on by default in 2D, and in 3D when the GPU compute path is active (it recomputes in ~0.1-0.3 s). */
 export function defaultLive(mode, gc = true) { return mode !== 3 || (ENV.gpuCompute && gc); }
 
@@ -30,13 +30,14 @@ export function makeDefaults(mode = 2) {
     k1: [2, 0, 0], k2: [0, 3, 0], a1: 1, a2: 1, f1: 0, f2: 0,
     pa: 2, pw: 0.08,
     // dynamics
-    D: 0.3, order: 2, hs: 'zel', nu: 1e-4, me: 1, mx: 30, live: defaultLive(mode),
-    gc: true,               // 3D: WebGPU compute path (when available)
+    D: 0.3, order: 2, hs: 'zel', nu: 1e-4, me: 1, mx: 30, live: defaultLive(mode, !ENV.lite),
+    gc: !ENV.lite,          // 3D: WebGPU compute path (when available); off by default in lite mode
+    perf: 'auto',           // performance preset: auto (decided after the GPU probe) | lite | full
     om: 1,                  // flat LCDM matter density (1 = EdS)
     // layout
     vis: 'fs',              // visible sections: f = fields, s = spectra, l = Legendre lab, e = explain
     // 2D field panels: [kind, sub, cmap, log]  ('' = default)
-    slots: [['sheetgpu', 'both', '', ''], ['hc', '', '', ''], ['fabs', 'sheet', '', ''], ['fphase', 'sheet', '', '']],
+    slots: [[ENV.lite ? 'sheetcpu' : 'sheetgpu', ENV.lite ? '' : 'both', '', ''], ['hc', '', '', ''], ['fabs', 'sheet', '', ''], ['fphase', 'sheet', '', '']],
     same: true, rmin: 0.1, rmax: 30,
     // 3D views
     v1: 'cic', vm: 'emission', vo: 10, s1: 'hc', sa: 2, si: 0.5, fo: 'cic',
@@ -79,6 +80,7 @@ const SCHEMA = [
   ['mx', 'mx', 'num', [1, 200]],
   ['live', 'lv', 'bool'],
   ['gc', 'gc', 'bool'],
+  ['perf', 'perf', 'str', ['auto', 'lite', 'full']],
   ['om', 'om', 'omega'],
   ['vis', 'v', 'str'],
   ['slots', 'f', 'slots'],

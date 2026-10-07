@@ -17,6 +17,7 @@
   <div class="lab-shell">
     <aside class="lab-controls" id="lab-controls" aria-label="Controls"></aside>
     <main class="lab-main">
+      <div class="lab-banner" id="lab-banner" role="alert" hidden></div>
       <div class="lab-vis hcc-controls" id="lab-vis"></div>
       <section id="sec-fields" class="lab-section"><h2>Fields</h2><div id="fields-host"></div></section>
       <section id="sec-spectra" class="lab-section"><h2>Spectra</h2><div id="spectra-host"></div></section>
@@ -29,7 +30,7 @@
     <span id="lab-status-text">starting …</span>
     <span class="lab-spacer"></span>
     <span id="lab-status-timing" class="lab-timing"></span>
-    <span id="lab-status-backend" class="lab-backend"></span>
+    <span id="lab-status-backend" class="lab-backend" title="graphics backend and performance preset">…</span>
   </footer>
   <script type="module" src="./js/main.js"></script>
 </body>
