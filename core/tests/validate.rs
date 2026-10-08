@@ -445,3 +445,45 @@ fn tophat_smoothing() {
     assert!((total - 1.0).abs() < 1e-6);
     assert!((peak * area - 1.0).abs() < 0.15);
 }
+
+#[test]
+fn dual_sheet_density() {
+    use hcc_core::hopfcole::{dual_sheet_density, HcMethod};
+    use hcc_core::ics::Preset;
+    // plane wave: exact cell-averaged density = (q(x_{i+1}) - q(x_i))/dx with q from Newton
+    let n = 128usize;
+    let mut c = Cosmo::new(2, n, 1.0);
+    c.set_ic_preset(Preset::PlaneWaves { modes: vec![([2, 0, 0], 1.0, 0.0)] }, 0.0, 0.0);
+    c.build_lpt(1);
+    let (a, k, d) = (1.0f64, 2.0 * std::f64::consts::PI * 2.0, 0.6f64);
+    let hc = c.hopf_cole(d, 1e-5, HcMethod::RealSpace { refine: 2 });
+    let rho = dual_sheet_density(&c.grid, &hc.qmap);
+    let qof = |x: f64| { let mut q = x; for _ in 0..60 { let f = q - d * a * (k * q).sin() / k - x; let fp = 1.0 - d * a * (k * q).cos(); q -= f / fp; } q };
+    let mut err: f64 = 0.0; let mut errp: f64 = 0.0; let mut maxrel: f64 = 0.0;
+    for i in 0..n {
+        let x0 = i as f64 / n as f64; let x1 = (i + 1) as f64 / n as f64;
+        let exact_avg = (qof(x1) - qof(x0)) * n as f64;              // cell-averaged density
+        let exact_pt = 1.0 / (1.0 - d * a * (k * qof(x0)).cos());    // point value at the corner
+        let got = rho[i * n] as f64;
+        err += (got - exact_avg).powi(2); errp += (hc.delta[i * n] as f64 + 1.0 - exact_pt).powi(2);
+        maxrel = maxrel.max((got / exact_avg - 1.0).abs());
+    }
+    let mean: f64 = rho.iter().map(|&v| v as f64).sum::<f64>() / rho.len() as f64;
+    println!("dual sheet: rms err {:.2e} (point-value FD density rms err {:.2e}), max rel {:.2e}, mean {:.8}", (err / n as f64).sqrt(), (errp / n as f64).sqrt(), maxrel, mean);
+    assert!((mean - 1.0).abs() < 1e-6, "mass conservation: mean {}", mean);
+    assert!(maxrel < 1e-2, "max rel {}", maxrel);
+    // Gaussian field, 2D, near shell crossing: mean exactly 1 and agreement with the sheet
+    let mut c = Cosmo::new(2, 128, 1.0);
+    c.set_ic_gaussian(PkShape::PowerLaw { n: -1.0 }, 0.05, 3, 1.0);
+    c.build_lpt(2);
+    let d = 0.8 * c.shell_crossing(2);
+    let (hc, _) = c.hopf_cole_lpt(d, 2, 1e-5, HcMethod::RealSpace { refine: 2 }, false);
+    let dual = dual_sheet_density(&c.grid, &hc.qmap);
+    let sheet = c.sheet_density(d, 2, 128, 4);
+    let mean: f64 = dual.iter().map(|&v| v as f64).sum::<f64>() / dual.len() as f64;
+    let mut e = 0.0; let mut nn = 0.0; let mut e2 = 0.0;
+    for i in 0..dual.len() { e += (dual[i] as f64 - sheet[i] as f64).powi(2); nn += (sheet[i] as f64 - 1.0).powi(2); e2 += (hc.delta[i] as f64 + 1.0 - sheet[i] as f64).powi(2); }
+    println!("GRF near D_sc: dual mean {mean:.6}, rel rms (dual - sheet) {:.3e}, (FD density - sheet) {:.3e}, max dual {:.2} max sheet {:.2}", (e / nn).sqrt(), (e2 / nn).sqrt(), dual.iter().cloned().fold(0.0f32, f32::max), sheet.iter().cloned().fold(0.0f32, f32::max));
+    assert!((mean - 1.0).abs() < 1e-5);
+    assert!((e / nn).sqrt() < 0.15);
+}

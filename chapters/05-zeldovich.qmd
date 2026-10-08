@@ -170,6 +170,29 @@ order the small transverse part $\boldsymbol\Psi_T$ (about $10^{-3}$ of the
 longitudinal one) breaks the gradient structure; it can be restored to first
 order by correcting the inverse map, $\mathbf q(\mathbf x) \simeq \mathbf q_L(\mathbf x) - \boldsymbol\Psi_T(\mathbf q_L(\mathbf x))$.
 
+### The dual sheet: a mass-conserving density from the inverse map
+
+The construction returns more than a density formula: it returns the
+inverse map itself, $\mathbf q(\mathbf x) = \mathbf x - D\,\mathbf u(\mathbf x)$
+(the position of the softmin of the Hopf integral), at every Eulerian grid
+point. The mass inside an Eulerian cell is then simply the Lagrangian volume
+of the cell's *preimage*, the polygon (2D) or hexahedron (3D) spanned by
+$\mathbf q$ at the cell's corners. These preimages tile Lagrangian space, so
+mass is conserved exactly, and no derivative is ever taken: the corner
+values of $\mathbf q$ stay accurate no matter how steep the map is, so
+peaks are not under-resolved the way the finite-difference Hessian
+under-resolves them. This is the exact mirror image of the phase-space
+sheet, with Eulerian cells playing the role of the Lagrangian simplices, and
+it inherits the best of both: the Legendre accuracy in voids, where
+$\mathbf q(\mathbf x)$ varies slowly, and the sheet's mass bookkeeping at
+peaks. In the laboratory it is the "dual sheet" density; near shell crossing
+its residual against the sheet is several times smaller than that of the
+finite-difference density. Computing the density from the Eulerian-to-Lagrangian
+Jacobian is itself an old idea in the adhesion literature
+[@gurbatov2012, §5.4, and references therein], where the discontinuities of
+$\mathbf q(\mathbf x)$ after collisions carry the $\delta$-function parts of
+the density (the Monge–Ampère measure of @liu2025).
+
 ::: {.callout-note title="Where this sits in the literature"}
 The two ingredients are classical, their combination appears not to be. That
 the inviscid adhesion model is the Legendre transform (convex hull) of the
@@ -185,8 +208,10 @@ modified fluid models with Lagrangian perturbative expansions
 [@buchert2005]. Using the $n$LPT displacement potential as the input to the
 Hopf–Lax/Hopf–Cole construction, as a forward Eulerian density estimator
 with the transverse correction at third order and beyond, we did not find
-in a search of ADS and the web (October 2026); treat it as a conjecture of
-novelty rather than a verified one.
+in a search of ADS and the web (October 2026), nor in the review of
+@gurbatov2012, whose "modified Zel'dovich approximations" (§4.2) are
+truncations and smoothings of the linear potential rather than higher-order
+potentials; treat it as a conjecture of novelty rather than a verified one.
 :::
 
 After shell crossing the two descriptions part ways deliberately: the sheet

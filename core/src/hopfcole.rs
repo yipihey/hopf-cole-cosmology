@@ -27,6 +27,11 @@ pub struct HopfColeResult {
     pub exponent_range: f64,
     /// grid floor of the real-space method, ν_min ≈ dx²/(4 D refine²) (0 for the spectral method)
     pub nu_floor: f64,
+    /// Inverse Lagrangian map q(x) = x - D u(x) at the grid points (interleaved, unwrapped),
+    /// i.e. the softmin position of the Hopf integral; overwritten by the transverse correction.
+    pub qmap: Vec<f32>,
+    /// Growth factor the result was computed at.
+    pub dgrow: f64,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -233,6 +238,12 @@ pub fn hopf_cole_solve(grid: &Grid, eng: &mut FftEngine, phi: &[f64], nu: f64, d
         }
         delta[idx] = (det_i_plus(&mt, d) - 1.0) as f32;
     }
+    let dx = grid.dx();
+    let mut qmap = vec![0.0f32; grid.size * d];
+    for idx in 0..grid.size {
+        let ijk = grid.unravel(idx);
+        for a in 0..d { qmap[idx * d + a] = (ijk[a] as f64 * dx - dgrow * velocity[idx * d + a] as f64) as f32; }
+    }
     HopfColeResult {
         delta,
         phi_v: phiv.iter().map(|&v| v as f32).collect(),
@@ -242,6 +253,8 @@ pub fn hopf_cole_solve(grid: &Grid, eng: &mut FftEngine, phi: &[f64], nu: f64, d
         nu_eff,
         exponent_range,
         nu_floor,
+        qmap,
+        dgrow,
     }
 }
 
@@ -343,4 +356,66 @@ pub fn hopf_lax_1d(phi0: &[f64], l: f64, t: f64) -> (Vec<f64>, Vec<f64>) {
         ystar[i] = y[p];
     }
     (phi, ystar)
+}
+
+/// "Dual sheet" density: the mass in an Eulerian cell equals the Lagrangian
+/// volume of its preimage, the polygon (2D) / hexahedron (3D) spanned by the
+/// inverse map q(x) at the cell corners.  Exactly mass conserving (the
+/// preimages tile Lagrangian space), no derivatives.  `qmap` interleaved,
+/// unwrapped; the displacement q - x is periodic and is used across the box edge.
+pub fn dual_sheet_density(grid: &Grid, qmap: &[f32]) -> Vec<f32> {
+    let d = grid.dim;
+    let n = grid.n;
+    let dx = grid.dx();
+    let l = grid.l;
+    let size = grid.size;
+    let mut rho = vec![0.0f32; size];
+    // q at corner (i+di, j+dj, k+dk) of cell (i,j,k): wrap the index, add L to the
+    // coordinate that wrapped so the polygon stays contiguous
+    let corner = |ijk: [usize; 3], off: [usize; 3]| -> [f64; 3] {
+        let mut idx = [0usize; 3];
+        let mut shift = [0.0f64; 3];
+        for a in 0..d {
+            let v = ijk[a] + off[a];
+            if v >= n { idx[a] = v - n; shift[a] = l; } else { idx[a] = v; }
+        }
+        let flat = grid.ravel(idx);
+        let mut q = [0.0f64; 3];
+        for a in 0..d { q[a] = qmap[flat * d + a] as f64 + shift[a]; }
+        q
+    };
+    if d == 2 {
+        for idx in 0..size {
+            let ijk = grid.unravel(idx);
+            let p = [corner(ijk, [0, 0, 0]), corner(ijk, [1, 0, 0]), corner(ijk, [1, 1, 0]), corner(ijk, [0, 1, 0])];
+            let mut a2 = 0.0;
+            for c in 0..4 { let (x1, y1) = (p[c][0], p[c][1]); let (x2, y2) = (p[(c + 1) % 4][0], p[(c + 1) % 4][1]); a2 += x1 * y2 - x2 * y1; }
+            rho[idx] = (0.5 * a2.abs() / (dx * dx)) as f32;
+        }
+    } else if d == 3 {
+        // hexahedron volume as the sum of the 6 Kuhn tetrahedra (corner bits x,y,z)
+        const TETS: [[usize; 4]; 6] = [[0, 1, 3, 7], [0, 1, 5, 7], [0, 2, 3, 7], [0, 2, 6, 7], [0, 4, 5, 7], [0, 4, 6, 7]];
+        for idx in 0..size {
+            let ijk = grid.unravel(idx);
+            let mut c = [[0.0f64; 3]; 8];
+            for b in 0..8 { c[b] = corner(ijk, [b & 1, (b >> 1) & 1, (b >> 2) & 1]); }
+            let mut vol = 0.0;
+            for t in TETS.iter() {
+                let (p0, p1, p2, p3) = (c[t[0]], c[t[1]], c[t[2]], c[t[3]]);
+                let e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+                let e2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+                let e3 = [p3[0] - p0[0], p3[1] - p0[1], p3[2] - p0[2]];
+                let det = e1[0] * (e2[1] * e3[2] - e2[2] * e3[1]) - e1[1] * (e2[0] * e3[2] - e2[2] * e3[0]) + e1[2] * (e2[0] * e3[1] - e2[1] * e3[0]);
+                vol += det / 6.0;
+            }
+            rho[idx] = (vol.abs() / (dx * dx * dx)) as f32;
+        }
+    } else {
+        for idx in 0..size {
+            let q0 = corner([idx, 0, 0], [0, 0, 0])[0];
+            let q1 = corner([idx, 0, 0], [1, 0, 0])[0];
+            rho[idx] = ((q1 - q0).abs() / dx) as f32;
+        }
+    }
+    rho
 }

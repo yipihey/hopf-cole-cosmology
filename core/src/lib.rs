@@ -220,6 +220,7 @@ impl Cosmo {
                 for c in 0..dim * dim { mt[c] = grads[c][idx]; }
                 r.delta[idx] = (lpt::det_i_plus(&mt, dim) - 1.0) as f32;
             }
+            r.qmap = q.iter().map(|&v| v as f32).collect();
         }
         (r, frac)
     }

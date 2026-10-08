@@ -172,6 +172,12 @@ impl CosmoSim {
         if !self.ok_order(1) { return vec![]; }
         self.inner.lpt_potential(d, order).0.iter().map(|&v| v as f32).collect()
     }
+    /// Mass-conserving "dual sheet" density ρ/ρ̄ from the inverse map of the last Hopf–Cole run.
+    pub fn hc_dual_density(&self) -> Vec<f32> {
+        self.hc.as_ref().map(|h| crate::hopfcole::dual_sheet_density(&self.inner.grid, &h.qmap)).unwrap_or_default()
+    }
+    /// Inverse Lagrangian map q(x) of the last Hopf–Cole run (interleaved, unwrapped).
+    pub fn hc_qmap(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.qmap.clone()).unwrap_or_default() }
     pub fn hc_delta(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.delta.clone()).unwrap_or_default() }
     pub fn hc_phi(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.phi_v.clone()).unwrap_or_default() }
     pub fn hc_velocity(&self) -> Vec<f32> { self.hc.as_ref().map(|h| h.velocity.clone()).unwrap_or_default() }
