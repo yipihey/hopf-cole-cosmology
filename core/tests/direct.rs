@@ -109,9 +109,22 @@ fn nufft_density_linear_and_refined() {
     let t0 = std::time::Instant::now();
     let rn = c.nufft_density(d, 2, 4, n);
     println!("NUFFT 64² refine 4 took {:?}", t0.elapsed());
+    // the NUFFT field is the band-limited density (exact Fourier coefficients up to the Nyquist
+    // frequency), not a cell average, so compare spectra: against the exact P1 deposit with the
+    // cell window removed, at low k
+    let mean: f64 = rn.iter().map(|&v| v as f64).sum::<f64>() / rn.len() as f64;
+    assert!((mean - 1.0).abs() < 1e-6);
     let ex = c.sheet_density_exact(d, 2, n, true, 1e4);
-    let mut e = 0.0; let mut nn = 0.0;
-    for i in 0..rn.len() { e += (rn[i] as f64 - ex[i] as f64).powi(2); nn += (ex[i] as f64 - 1.0).powi(2); }
-    println!("NUFFT vs exact P1 rel rms {:.3e}", (e / nn).sqrt());
-    assert!((e / nn).sqrt() < 0.08);
+    let dex: Vec<f32> = ex.iter().map(|v| v - 1.0).collect();
+    let pex = c.power_spectrum(&dex, 12, false);
+    let dn4: Vec<f32> = rn.iter().map(|v| v - 1.0).collect();
+    let pn4 = c.power_spectrum(&dn4, 12, false);
+    for i in 0..4 {
+        let kk = pn4.k[i];
+        let win = (1.0 - (kk * dq).powi(2) / 24.0).powi(2);
+        let r = pn4.p[i] / (pex.p[i] / win);
+        let tol = 0.01 + 2.0 * (kk * dq).powi(2) / 12.0 * 1.5;
+        println!("k={:.1}: NUFFT(refine 4)/exact-P1-deconvolved {:.4} (tol {:.4})", kk, r, tol);
+        assert!((r - 1.0).abs() < tol, "bin {i}: {r}");
+    }
 }
