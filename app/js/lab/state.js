@@ -43,7 +43,7 @@ export function makeDefaults(mode = 2) {
     v1: 'cic', vm: 'emission', vo: 10, s1: 'hc', sa: 2, si: 0.5, fo: 'cic',
     c1: 'inferno', c2: 'magma', c3: 'viridis', c4: 'twilight', l1: true, l2: true,
     // spectra
-    ser: mode === 3 ? ['lin', 'cic', 'hc', 'spt'] : ['lin', 'sheet', 'hc', 'spt'], km: 30,
+    ser: mode === 3 ? ['lin', 'cic', 'sheetp1', 'hc', 'hcdual', 'spt'] : ['lin', 'sheet', 'sheetp1', 'hc', 'hcdual', 'spt'], km: 30,
     // PDFs: top-hat diameter in grid cells
     pd: 10,
     // Legendre lab: which sheet is the reference of the difference maps (plain | p1 = vertex-interpolated, mass-conserving)

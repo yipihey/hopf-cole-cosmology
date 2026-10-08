@@ -347,7 +347,7 @@ export class Lab {
     this.appliedKey = null;
     // 3D: 'sheet' is the tetrahedral sheet; the measured CIC spectrum is the default there
     if (m === 3 && S.ser.includes('sheet') && !S.ser.includes('cic')) S.ser = S.ser.map((q) => (q === 'sheet' ? 'cic' : q));
-    else if (m === 2 && S.ser.join() === 'lin,cic,hc,spt') S.ser = ['lin', 'sheet', 'hc', 'spt'];
+    else if (m === 2 && S.ser.join() === 'lin,cic,sheetp1,hc,hcdual,spt') S.ser = ['lin', 'sheet', 'sheetp1', 'hc', 'hcdual', 'spt'];
     if (m === 3 && S.me > 1) S.me = 1;
     this.invalidate();
     this.controls.syncAll();
