@@ -171,7 +171,7 @@ impl Cosmo {
             let ijk = fine.unravel(idx);
             for a in 0..dim { pos[idx * dim + a] = (ijk[a] as f64 * dxf + comps[a][idx]) as f32; }
         }
-        direct::nufft_density(dim, &pos, npts, self.grid.l, ne, 1.25, 5)
+        direct::nufft_density(dim, &pos, npts, self.grid.l, ne, 1.0, 6)
     }
     /// Exact (r3d-voxelized, conservative) sheet deposit, P0 or P1 (vertex 1/|J| interpolated).
     pub fn sheet_density_exact(&self, d: f64, order: usize, ne: usize, p1: bool, wmax: f64) -> Vec<f32> {

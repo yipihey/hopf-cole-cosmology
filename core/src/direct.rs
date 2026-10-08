@@ -213,7 +213,7 @@ pub fn nufft_density(dim: usize, pos: &[f32], npts: usize, l: f64, ne: usize, si
     for p in 0..npts {
         for a in 0..dim { let x = pos[p * dim + a] as f64 / dxo; let f = x.floor(); i0[a] = f as i64; fr[a] = x - f; }
         // separable Gaussian weights
-        let mut wts = [[0.0f64; 16]; 3];
+        let mut wts = [[0.0f64; 40]; 3];
         for a in 0..dim { for s in -w..=w { let dxs = s as f64 - fr[a] + 0.5 - 0.5; // offset to cell index s relative to i0 (cell centres at i+0.5?) use node convention
             let dd = dxs; wts[a][(s + w) as usize] = (-dd * dd * inv2s2).exp(); } }
         if dim == 2 {

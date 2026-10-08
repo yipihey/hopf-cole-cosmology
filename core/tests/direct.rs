@@ -90,7 +90,11 @@ fn nufft_density_linear_and_refined() {
     let ps = c.power_spectrum(&dl, 12, false);
     let lin = c.linear_delta(d);
     let pl = c.power_spectrum(&lin, 12, false);
-    for i in 0..7 { let r = ps.p[i] / pl.p[i]; println!("k={:.1}: NUFFT/linear {:.4}", ps.k[i], r); assert!((r - 1.0).abs() < 0.01, "bin {i}: {r}"); }
+    // (the Zel'dovich density differs from D δ0 by realization-specific O(D) terms, hence the loose tolerance)
+    for i in 0..7 { let r = ps.p[i] / pl.p[i]; println!("k={:.1}: NUFFT/linear {:.4}", ps.k[i], r); assert!((r - 1.0).abs() < 0.03, "bin {i}: {r}"); }
+    // the sharper test: at the same D the NUFFT spectrum must match the exact sheet spectrum (direct method) at low k
+    let ds0 = c.direct_spectrum(d, 1, false, 12, 64, 1, 1e4);
+    for i in 0..5 { let r = ps.p[i] / ds0.p[i]; println!("k={:.1}: NUFFT/direct (linear regime) {:.4}", ps.k[i], r); assert!((r - 1.0).abs() < 0.01, "bin {i}: {r}"); }
     // and at a nonlinear time the NUFFT spectrum agrees with the direct (deposit-free) sheet spectrum at low k
     let d = 0.5 * c.shell_crossing(2);
     let rn = c.nufft_density(d, 2, 2, n);
