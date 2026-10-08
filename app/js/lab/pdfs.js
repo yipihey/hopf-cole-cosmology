@@ -9,7 +9,7 @@
 
 import { LinePlot, PALETTE } from '../viz/plot.js';
 import { el, numIn, fmtNum } from './dom.js';
-import { DUAL_COLOR } from './spectra.js';
+import { DUAL_COLOR, P1_COLOR } from './spectra.js';
 import { Engine } from './engine.js';
 
 export const NBIN = 60, X0 = -2, X1 = 2.5, DX = (X1 - X0) / NBIN;
@@ -90,6 +90,7 @@ export class PdfLab {
       'Linear theory predicts a Gaussian δ; once its rms exceeds about 0.3 the Gaussian already assigns probability to 1+δ < 0 (negative densities), which a pressureless fluid cannot have, and the dotted grey curve (the Gaussian mapped to log₁₀(1+δ)) misses exactly that mass.',
       'Gravity skews the distribution: underdense regions empty out towards a void density (a pile-up of cells just above 1+δ = 0 in log₁₀(1+δ) ≈ −1), while collapse produces a long high-density tail.',
       'A lognormal (dashed grey: a Gaussian in log₁₀(1+δ) with the mean and variance of ln(1+δ) of the sheet in 2D, of CIC in 3D) is often a good approximation (Coles & Jones 1991), though it cannot capture the shape of the tail exactly.',
+      'The P1 sheet gives every simplex a linear density shape (interpolating the vertex values 1/|J|) that still deposits exactly the simplex mass, so before shell crossing its PDF follows that of the plain sheet closely (the two differ only by cell-scale discretization noise), and it is the cleaner reference for the Hopf–Cole variants.',
       'The Hopf–Cole dual sheet is the mass-conserving density of the Hopf–Cole inverse map (cell mass = Lagrangian volume of its preimage); before shell crossing it should follow the sheet closely in both the voids and the high-density tail, where the finite-difference Hopf–Cole density under-resolves the peaks.',
       'After shell crossing the multi-stream sheet adds the streams, whereas the Hopf–Cole (adhesion) solution keeps one stream and glues them into walls; the two therefore populate the high-density tail differently, and CIC adds its own smoothing of the sheet.',
       'Top-hat smoothing lowers the variance and Gaussianises the PDF (averaging many cells), so the smoothed curves lie closer to the Gaussian and the lognormal, and the rare high values of the grid-scale PDF disappear.',
@@ -108,13 +109,13 @@ export class PdfLab {
   /** Include the sheet? 2D: always. 3D: when the GPU path computes it (milliseconds), at n <= 64, or if it is already cached. */
   includeSheet(P) {
     const e = this.app.eng;
-    return P.mode === 2 || e.gpuActive(P) || P.n <= 64 || e.peek(['sheet', P.D, P.order]) !== undefined;
+    return P.mode === 2 || e.gpuActive(P) || P.n <= 64 || e.peek(['sheet', P.D, P.order]) !== undefined || e.peek(['sheetp1', P.D, P.order]) !== undefined;
   }
 
   /** Method ids in plot order. Zel'dovich / Legendre are left out when they coincide with the selected source. */
   methods(P, runtime = true) {
     const m = [];
-    if (P.mode === 2 || !runtime || this.includeSheet(P)) m.push('sheet');
+    if (P.mode === 2 || !runtime || this.includeSheet(P)) m.push('sheet', 'sheetp1');
     m.push('cic', 'hc', 'hcdual');
     if (P.hs !== 'zel') m.push('hcz'); else m.push('hcl');
     m.push('lin');
@@ -127,6 +128,7 @@ export class PdfLab {
     switch (m) {
       case 'lin': return { label: 'linear D·δ₀', color: '#8a8f98', width: 2.2 };
       case 'sheet': return d3 ? { label: 'sheet (tetrahedra)', color: PALETTE[5], width: 1.4 } : { label: 'sheet', color: PALETTE[0], width: 3, opacity: 0.6 };
+      case 'sheetp1': return { label: d3 ? 'sheet P1 (tetrahedra)' : 'sheet P1', color: P1_COLOR, width: 1.4 };
       case 'cic': return d3 ? { label: 'CIC', color: PALETTE[0], width: 3, opacity: 0.6 } : { label: 'CIC', color: PALETTE[5], width: 1.4 };
       case 'hc': return { label: 'Hopf–Cole' + hcTag, color: PALETTE[1], width: 1.4 };
       case 'hcdual': return { label: 'Hopf–Cole dual sheet' + hcTag, color: DUAL_COLOR, width: 1.4 };
@@ -152,10 +154,10 @@ export class PdfLab {
       const hc = Engine.isHcAny(m);
       if (hcOnly && !hc) continue;
       t.push({
-        label: `PDFs: ${m === 'lin' ? 'linear' : m === 'cic' ? 'CIC' : m === 'sheet' ? 'sheet' : m === 'hcdual' ? 'Hopf–Cole dual sheet' : 'Hopf–Cole'}${m === 'hcz' ? ' (Zel’dovich)' : m === 'hcl' ? ' (Legendre)' : ''}`,
-        heavy: d3 && m === 'sheet' && !e.gpuActive(P),
+        label: `PDFs: ${m === 'lin' ? 'linear' : m === 'cic' ? 'CIC' : m === 'sheet' ? 'sheet' : m === 'sheetp1' ? 'sheet P1' : m === 'hcdual' ? 'Hopf–Cole dual sheet' : 'Hopf–Cole'}${m === 'hcz' ? ' (Zel’dovich)' : m === 'hcl' ? ' (Legendre)' : ''}`,
+        heavy: d3 && (m === 'sheet' || m === 'sheetp1') && !e.gpuActive(P),
         fn: async () => {
-          if (m === 'sheet' && !this.includeSheet(P)) return;
+          if ((m === 'sheet' || m === 'sheetp1') && !this.includeSheet(P)) return;
           if (m !== 'lin') await e.need('field', m, P);
           this.stats(m, P, 0);
           await e.needSmooth(m, P, P.pd);

@@ -12,6 +12,12 @@
 // WebGPU: vertex pulling from a storage buffer of positions; 9 periodic images
 // via instancing; additive blending into an rgba16float target; a second pass
 // maps accumulated density through the LUT. Fallback: exact CPU rasterization.
+//
+// P1 option (setVertexWeights + draw({p1:true})): with vertex densities w_v (e.g. 1/|J| at the Lagrangian grid points, index i*n+j,
+// same as the positions) a triangle no longer carries the constant density m/|A| but the linear (barycentric) interpolant
+//   rho(x) = (m/|A|) (sum_i lambda_i w_i) / mean_i(w_i),
+// which still deposits exactly the triangle mass (core/src/sheet.rs::sheet_density_2d_weighted). In the shader the flat per-triangle
+// factor m/(|A| mean w) is a flat varying and the vertex weight w a default (linear) varying; the fragment adds factor * w.
 
 import { cmapLUT } from './colormaps.js';
 import {
@@ -21,7 +27,7 @@ import {
 const WGSL = /* wgsl */`
 struct U {
   view : vec4f,   // x0, y0, size (domain window), L
-  geo  : vec4f,   // n, mass per triangle, 0, 0
+  geo  : vec4f,   // n, mass per triangle, p1 flag (1 = vertex-interpolated density), 0
   wire : vec4f,   // wire colour rgb, alpha
   rect : vec4f,   // square draw rect in canvas pixels: x0, y0, size, size
   map  : vec4f,   // vmin, vmax (mapping space), log flag, 0
@@ -30,6 +36,7 @@ struct U {
 @group(0) @binding(1) var<storage, read> pos : array<f32>;
 @group(0) @binding(2) var acc : texture_2d<f32>;
 @group(0) @binding(3) var lut : texture_2d<f32>;
+@group(0) @binding(4) var<storage, read> wts : array<f32>;   // per-vertex density weights (P1), index i*n+j; a dummy when unused
 
 fn vpos(i : u32, j : u32, n : u32) -> vec2f {
   let ii = i % n; let jj = j % n;
@@ -60,9 +67,23 @@ fn toClip(p : vec2f, inst : u32) -> vec4f {
   return vec4f(w.x * 2.0 - 1.0, w.y * 2.0 - 1.0, 0.0, 1.0);   // domain y up == texture row 0 at top
 }
 
+// weight of corner k (0..2) of triangle 'tri' (P1 sheet)
+fn tweight(tri : u32, k : u32, n : u32) -> f32 {
+  let cell = tri / 2u; let which = tri % 2u;
+  let i = cell / n; let j = cell % n;
+  var di = 0u; var dj = 0u;
+  if (which == 0u) {
+    if (k == 1u) { di = 1u; } else if (k == 2u) { di = 1u; dj = 1u; }
+  } else {
+    if (k == 1u) { di = 1u; dj = 1u; } else if (k == 2u) { dj = 1u; }
+  }
+  return wts[((i + di) % n) * n + ((j + dj) % n)];
+}
+
 struct TriOut {
   @builtin(position) pos : vec4f,
-  @location(0) @interpolate(flat) dens : f32,
+  @location(0) @interpolate(flat) dens : f32,   // flat per-triangle factor (plain: the density itself)
+  @location(1) wi : f32,                        // vertex weight, linearly interpolated (plain: 1)
 };
 
 @vertex
@@ -74,7 +95,19 @@ fn vsTri(@builtin(vertex_index) vi : u32, @builtin(instance_index) inst : u32) -
   let c = tcorner(tri, 2u, n);
   let area = 0.5 * abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
   var o : TriOut;
-  o.dens = min(u.geo.y / max(area, 1e-12), 6.0e4);   // stay inside half-float range
+  var fac = u.geo.y / max(area, 1e-12);
+  var wv = 1.0;
+  if (u.geo.z > 0.5) {
+    let w0 = tweight(tri, 0u, n); let w1 = tweight(tri, 1u, n); let w2 = tweight(tri, 2u, n);
+    let wm = (w0 + w1 + w2) / 3.0;
+    if (wm > 0.0) {
+      fac = fac / wm;
+      wv = w0;
+      if (k == 1u) { wv = w1; } else if (k == 2u) { wv = w2; }
+    }
+  }
+  o.dens = min(fac, 6.0e4);   // stay inside half-float range
+  o.wi = wv;
   var p = a;
   if (k == 1u) { p = b; } else if (k == 2u) { p = c; }
   o.pos = toClip(p, inst);
@@ -82,8 +115,8 @@ fn vsTri(@builtin(vertex_index) vi : u32, @builtin(instance_index) inst : u32) -
 }
 
 @fragment
-fn fsTri(@location(0) @interpolate(flat) dens : f32) -> @location(0) vec4f {
-  return vec4f(dens, 1.0, 0.0, 0.0);   // r: density sum, g: number of streams
+fn fsTri(@location(0) @interpolate(flat) dens : f32, @location(1) wi : f32) -> @location(0) vec4f {
+  return vec4f(min(dens * wi, 6.0e4), 1.0, 0.0, 0.0);   // r: density sum, g: number of streams
 }
 
 // ---- resolve pass: accumulated density -> colour -------------------------
@@ -135,7 +168,7 @@ fn fsWire() -> @location(0) vec4f {
 
 const DEFAULTS = {
   mode: 'density', cmap: 'magma', vmin: 0.1, vmax: 100, log: true,
-  wireAlpha: 0.35, wireColor: [1, 1, 1],
+  wireAlpha: 0.35, wireColor: [1, 1, 1], p1: false,
 };
 
 export class SheetView {
@@ -145,6 +178,7 @@ export class SheetView {
     this.opts = opts;
     this.backend = null;
     this.positions = null; this.n = 0; this.L = 1;
+    this.weights = null;                    // Float32Array n*n of vertex densities (P1) or null
     this.view = null;                       // {x0,y0,size} or null = full box
     this.params = { ...DEFAULTS, ...(opts.cmap ? { cmap: opts.cmap } : {}), ...opts };
     this._initPromise = null;
@@ -182,6 +216,7 @@ export class SheetView {
       const layoutA = device.createBindGroupLayout({ entries: [
         { binding: 0, visibility: V | F, buffer: { type: 'uniform' } },
         { binding: 1, visibility: V, buffer: { type: 'read-only-storage' } },
+        { binding: 4, visibility: V, buffer: { type: 'read-only-storage' } },
       ] });
       const layoutB = device.createBindGroupLayout({ entries: [
         { binding: 0, visibility: F, buffer: { type: 'uniform' } },
@@ -219,7 +254,8 @@ export class SheetView {
     const context = this.canvas.getContext('webgpu');
     if (!context) throw new Error('canvas.getContext("webgpu") returned null');
     context.configure({ device, format, alphaMode: 'premultiplied' });
-    this._gpu = { device, format, ...res, ubuf, lutTex, context, posBuf: null, accTex: null, bindA: null, bindB: null, lutName: null };
+    const wDummy = device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this._gpu = { device, format, ...res, ubuf, lutTex, context, posBuf: null, wBuf: null, wDummy, boundW: null, accTex: null, bindA: null, bindB: null, lutName: null };
     this._ub = new Float32Array(20);
   }
 
@@ -246,6 +282,31 @@ export class SheetView {
       }
       G.device.queue.writeBuffer(G.posBuf, 0, positions.buffer, positions.byteOffset, bytes);
     }
+    if (this.weights && this.weights.length !== n * n) this.weights = null;      // grid size changed under the weights
+    if (G && this.weights !== null && G.wBuf && G.wBuf.size !== 4 * n * n) this._uploadWeights();
+  }
+
+  /**
+   * Per-vertex density weights for the P1 sheet (draw option p1: true): Float32Array of length n*n, index i*n+j like the positions
+   * (e.g. 1/|J| on the Lagrangian grid); null removes them. Without weights, p1 has no effect.
+   */
+  setVertexWeights(w) {
+    if (w == null) { this.weights = null; return; }
+    if (!this.n || w.length < this.n * this.n) throw new Error(`SheetView.setVertexWeights: need ${this.n * this.n} floats (call setMesh first), got ${w.length}`);
+    this.weights = w instanceof Float32Array ? w.subarray(0, this.n * this.n) : Float32Array.from(w.subarray ? w.subarray(0, this.n * this.n) : w.slice(0, this.n * this.n));
+    this._uploadWeights();
+  }
+
+  _uploadWeights() {
+    const G = this._gpu;
+    if (!G || !this.weights) return;
+    const bytes = 4 * this.n * this.n;
+    if (!G.wBuf || G.wBuf.size !== bytes) {
+      if (G.wBuf) G.wBuf.destroy();
+      G.wBuf = G.device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      G.bindA = null;
+    }
+    G.device.queue.writeBuffer(G.wBuf, 0, this.weights.buffer, this.weights.byteOffset, bytes);
   }
 
   /** Zoom to a square window of the periodic domain; call with no args to reset. */
@@ -259,12 +320,13 @@ export class SheetView {
   destroy() {
     if (this._ro) this._ro.disconnect();
     const G = this._gpu;
-    if (G) { if (G.posBuf) G.posBuf.destroy(); if (G.accTex) G.accTex.destroy(); }
+    if (G) { if (G.posBuf) G.posBuf.destroy(); if (G.wBuf) G.wBuf.destroy(); if (G.wDummy) G.wDummy.destroy(); if (G.accTex) G.accTex.destroy(); }
   }
 
   /**
    * Render. Parameters persist between calls (and are reused on resize).
-   * @param {{mode?:'density'|'wire'|'both', cmap?:string, vmin?:number, vmax?:number, log?:boolean, wireAlpha?:number, wireColor?:number[]}} [p]
+   * @param {{mode?:'density'|'wire'|'both', cmap?:string, vmin?:number, vmax?:number, log?:boolean, wireAlpha?:number, wireColor?:number[], p1?:boolean}} [p]
+   *   p1: vertex-interpolated (P1) density; needs setVertexWeights, otherwise the plain constant-per-triangle density is drawn
    */
   draw(p = {}) {
     if (!this.backend || !this.positions) return;
@@ -297,10 +359,14 @@ export class SheetView {
       device.queue.writeTexture({ texture: G.lutTex }, cmapLUT(P.cmap, 256), { bytesPerRow: 1024 }, { width: 256, height: 1 });
       G.lutName = P.cmap;
     }
+    const useP1 = !!(P.p1 && this.weights);
+    const wRes = useP1 && G.wBuf ? G.wBuf : G.wDummy;
+    if (G.boundW !== wRes) { G.bindA = null; G.boundW = wRes; }
     if (!G.bindA) {
       G.bindA = device.createBindGroup({ layout: G.layoutA, entries: [
         { binding: 0, resource: { buffer: G.ubuf } },
         { binding: 1, resource: { buffer: G.posBuf } },
+        { binding: 4, resource: { buffer: wRes } },
       ] });
       G.bindB = device.createBindGroup({ layout: G.layoutB, entries: [
         { binding: 0, resource: { buffer: G.ubuf } },
@@ -311,7 +377,7 @@ export class SheetView {
     const [x0, y0, size] = this._window();
     const lo = P.log ? Math.log10(Math.max(P.vmin, 1e-30)) : P.vmin, hi = P.log ? Math.log10(Math.max(P.vmax, 1e-30)) : P.vmax;
     const u = this._ub, wc = P.wireColor || [1, 1, 1];
-    u.set([x0, y0, size, L,  n, (L / n) * (L / n) / 2, 0, 0,  wc[0], wc[1], wc[2], P.wireAlpha,
+    u.set([x0, y0, size, L,  n, (L / n) * (L / n) / 2, useP1 ? 1 : 0, 0,  wc[0], wc[1], wc[2], P.wireAlpha,
       R.x, R.y, R.size, R.size,  lo, hi, P.log ? 1 : 0, 0]);
     device.queue.writeBuffer(G.ubuf, 0, u);
 
@@ -364,12 +430,16 @@ export class SheetView {
     const shifts = [];
     for (let sy = -1; sy <= 1; sy++) for (let sx = -1; sx <= 1; sx++) shifts.push([sx * L, sy * L]);
     const cell = new Float64Array(8);
+    const useP1 = !!(P.p1 && this.weights), Wt = this.weights;
 
     if (wantDensity) {
       const acc = new Float32Array(N * N);
       const mass = (L / n) * (L / n) / 2;
       for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
         this._cell(i, j, cell);
+        // vertex weights of the cell corners a,b,c,d (P1)
+        const i1 = i + 1 === n ? 0 : i + 1, j1 = j + 1 === n ? 0 : j + 1;
+        const wa = useP1 ? Wt[i * n + j] : 1, wb = useP1 ? Wt[i1 * n + j] : 1, wc = useP1 ? Wt[i1 * n + j1] : 1, wd = useP1 ? Wt[i * n + j1] : 1;
         for (let t = 0; t < 2; t++) {
           // triangle 0: a,b,c ; triangle 1: a,c,d
           const ax = cell[0], ay = cell[1];
@@ -378,7 +448,11 @@ export class SheetView {
           const det = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
           const area = 0.5 * Math.abs(det);
           if (!(area > 1e-12)) continue;
-          const dens = Math.min(mass / area, 6e4);
+          // P1: flat factor m / (|A| mean w) times the linearly interpolated vertex weight; plain: the constant m / |A|
+          const wB = t ? wc : wb, wC = t ? wd : wc;
+          const wmean = (wa + wB + wC) / 3;
+          const p1t = useP1 && wmean > 0;
+          const dens = p1t ? mass / area / wmean : Math.min(mass / area, 6e4);
           const minx = Math.min(ax, bx, cx), maxx = Math.max(ax, bx, cx), miny = Math.min(ay, by, cy), maxy = Math.max(ay, by, cy);
           for (const [sx, sy] of shifts) {
             if (maxx + sx < wx0 || minx + sx > wx0 + wsize || maxy + sy < wy0 || miny + sy > wy0 + wsize) continue;
@@ -396,7 +470,7 @@ export class SheetView {
                 // barycentric coordinates relative to a
                 const l1 = (qx * (pcy - pay) - qy * (pcx - pax)) * idet;
                 const l2 = ((pbx - pax) * qy - (pby - pay) * qx) * idet;
-                if (l1 >= 0 && l2 >= 0 && l1 + l2 <= 1) acc[py * N + px] += dens;
+                if (l1 >= 0 && l2 >= 0 && l1 + l2 <= 1) acc[py * N + px] += p1t ? Math.min(dens * ((1 - l1 - l2) * wa + l1 * wB + l2 * wC), 6e4) : dens;
               }
             }
           }

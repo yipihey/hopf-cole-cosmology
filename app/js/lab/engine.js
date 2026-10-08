@@ -401,7 +401,19 @@ export class Engine {
         });
         if (gen !== this.gen) return;
         this.seed(key, rho);
-        this.gFresh.sheet = key.join('|');
+        this.gFresh.sheet = key.join('|'); this.gFresh.sheetp1 = null;     // 'sheet-rho' holds the plain sheet now
+      } else if (which === 'sheetp1') {
+        // P1 sheet: same tetrahedra, density interpolated linearly from the vertex densities 1/|J| (GPU finite-difference Jacobian of the same displacement)
+        const key = ['sheetp1', P.D, P.order];
+        if (this.peek(key) !== undefined) return;
+        const rho = await this.timeAsync('sheet P1 (tetra, GPU)', async () => {
+          const disp = g.displacement(this.gGvals(P.D), order);
+          const w = this.sheetG.vertexWeights(disp);
+          return g.readField(this.sheetG.density(disp, w));
+        });
+        if (gen !== this.gen) return;
+        this.seed(key, rho);
+        this.gFresh.sheetp1 = key.join('|'); this.gFresh.sheet = null;
       } else if (Engine.isHc(which) && P.me === 1) {
         const src = this.hcSrcOf(which, P), tag = this.hcTag(P, src);
         const key = this.hcKey(P, src);
@@ -498,6 +510,7 @@ export class Engine {
       const hcLike = Engine.isHc(which);
       if (which === 'cic' && this.gFresh.cic === fkey) { buf = g.buf('rho'); offset = 1; }
       else if (which === 'sheet' && this.gFresh.sheet === fkey) { buf = g.buf('sheet-rho'); offset = 1; }
+      else if (which === 'sheetp1' && this.gFresh.sheetp1 === fkey) { buf = g.buf('sheet-rho'); offset = 1; }
       else if (hcLike && this.gFresh.hc === fkey) buf = g.buf('hc-delta');
       else if (Engine.isDual(which) && this.gFresh.dual === fkey) { buf = g.buf('dual-rho'); offset = 1; }
       else buf = g.uploadField(this.delta(which, P));
@@ -549,6 +562,19 @@ export class Engine {
     // 2D: 2x2 supersampled triangles; 3D: six Kuhn tetrahedra per Lagrangian cell, point-sampled (GPU path: seeded by _gpuField; WASM ~1 s at 64^3)
     return this.memo(['sheet', P.D, P.order], () => { this.ensureWasm(P.order); return this.time(this.dim === 3 ? 'sheet (tetra, CPU)' : 'sheet', () =>
       this.sim.sheet_density(P.D, P.order, this.n, this.dim === 3 ? 1 : 2)); });
+  }
+  /**
+   * P1 sheet: the same simplices as sheet(), but the density inside each simplex is the linear (barycentric) interpolant of the
+   * vertex densities 1/|J(q_v)| (clamped at 1e4), rescaled per simplex to deposit exactly its mass; exactly mass conserving, second-order
+   * accurate (core/src/sheet.rs::sheet_density_*_weighted). GPU path in 3D: seeded by _gpuField.
+   */
+  sheetP1(P) {
+    return this.memo(['sheetp1', P.D, P.order], () => { this.ensureWasm(P.order); return this.time(this.dim === 3 ? 'sheet P1 (tetra, CPU)' : 'sheet P1', () =>
+      this.sim.sheet_density_p1(P.D, Math.min(P.order, this.wOrder), this.n, this.dim === 3 ? 1 : 2)); });
+  }
+  /** Vertex densities 1/|J(q)| (clamped at 1e4) on the Lagrangian grid [ix*n+iy] for the GPU P1 sheet view (2D). */
+  vertexW(P) {
+    return this.memo(['vweights', P.D, P.order], () => { this.ensureWasm(P.order); return this.time('vertex densities', () => this.sim.vertex_density(P.D, Math.min(P.order, this.wOrder))); });
   }
   cic(P) {
     return this.memo(['cic', P.D, P.order], () => { this.ensureWasm(P.order); return this.time('CIC', () => this.sim.cic_density(P.D, P.order, this.n)); });
@@ -611,7 +637,7 @@ export class Engine {
   /** Parameter parts identifying a density-like field. */
   fieldKey(which, P) {
     switch (which) {
-      case 'sheet': case 'cic': return [which, P.D, P.order];
+      case 'sheet': case 'sheetp1': case 'cic': return [which, P.D, P.order];
       case 'hc': case 'hcz': case 'hcl': return this.hcKey(P, this.hcSrcOf(which, P));
       case 'hcdual': case 'hczdual': case 'hcldual': return ['hcd', ...this.hcKey(P, this.hcSrcOf(which, P))];
       default: return ['lin', P.D];
@@ -623,7 +649,7 @@ export class Engine {
       if (Engine.isHc(which)) return this.hc(P, this.hcSrcOf(which, P)).delta;
       if (Engine.isDual(which)) { const r = this.dualRho(P, this.hcSrcOf(which, P)), o = new Float32Array(r.length); for (let i = 0; i < o.length; i++) o[i] = r[i] - 1; return o; }
       if (which === 'lin') return this.linear(P);
-      const rho = which === 'sheet' ? this.sheet(P) : this.cic(P);
+      const rho = which === 'sheet' ? this.sheet(P) : which === 'sheetp1' ? this.sheetP1(P) : this.cic(P);
       const o = new Float32Array(rho.length);
       for (let i = 0; i < o.length; i++) o[i] = rho[i] - 1;
       return o;

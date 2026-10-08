@@ -5,8 +5,8 @@ import { fmap, percentiles, mean, minmax } from '../hcc.js';
 
 export const LIN_MAX = 5;       // upper colour limit for non-log density maps
 
-const SUB_OF = [['sheet', 'sheet'], ['cic', 'CIC'], ['hc', 'Hopf–Cole'], ['hcdual', 'Hopf–Cole dual sheet'], ['lin', 'linear']];
-const OF_NAME = { sheet: 'sheet', cic: 'CIC', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' };
+const SUB_OF = [['sheet', 'sheet'], ['sheetp1', 'sheet (P1)'], ['cic', 'CIC'], ['hc', 'Hopf–Cole'], ['hcdual', 'Hopf–Cole dual sheet'], ['lin', 'linear']];
+const OF_NAME = { sheet: 'sheet', sheetp1: 'P1 sheet', cic: 'CIC', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' };
 
 /** Shift the raw FFT-ordered n×n map [ikx*n+iky] so that k = 0 sits at the centre. */
 export function fftshift2D(a, n) {
@@ -31,6 +31,18 @@ export const CATALOG = {
     label: 'Sheet density (GPU, additive triangles)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', gpu: true,
     subs: { label: 'draw', options: [['density', 'density'], ['wire', 'wire'], ['both', 'both']], def: 'both' },
     caption: () => 'The Lagrangian grid x(q,D) = q + ΣDⁿΨ⁽ⁿ⁾(q) drawn as triangles whose mass is spread over their image and added: folded, multi-stream regions accumulate. “wire” shows the deformed grid; folds appear after shell crossing.',
+    cpu: 'sheetcpu',
+  },
+  sheetp1gpu: {
+    label: 'Sheet density (GPU, P1 vertex-interpolated)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', gpu: true, p1: true,
+    subs: { label: 'draw', options: [['density', 'density'], ['wire', 'wire'], ['both', 'both']], def: 'density' },
+    caption: () => 'The same additive triangles, but the density inside each triangle varies linearly between the vertex values 1/|J| (barycentric interpolation, rescaled so that every triangle still deposits exactly its mass): no per-triangle facets, mass conserved, second-order accurate.',
+    cpu: 'sheetp1cpu',
+  },
+  sheetp1cpu: {
+    label: 'Sheet density (P1, CPU rasterized)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
+    data: (e, P) => e.sheetP1(P),
+    caption: () => 'P1 sheet: Σ over streams of the vertex-interpolated density (linear between the vertex values 1/|J| inside each triangle, normalised to the triangle mass), point-sampled with 2×2 supersampling in the Rust core.',
   },
   sheetcpu: {
     label: 'Sheet density (CPU rasterized)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
@@ -110,7 +122,7 @@ export const CATALOG = {
   },
 };
 
-export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed'];
+export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'sheetp1gpu', 'sheetp1cpu', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed'];
 
 /** Percentile-based range helpers for special classes. */
 export function psihatRange(arr) {

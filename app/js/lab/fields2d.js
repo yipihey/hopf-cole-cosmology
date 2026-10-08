@@ -119,7 +119,7 @@ class Slot {
     try {
       let { kind, def, sub, cmap, log } = this.cfg;
       this.syncHidden(def);
-      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG.sheetcpu : def).caption(sub, P);
+      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG[def.cpu] : def).caption(sub, P);
       this.note.hidden = true;
       const n = eng.n;
       if (def.gpu && this.app.gpu) {
@@ -129,9 +129,9 @@ class Slot {
       this.cvS.hidden = true; this.cvF.hidden = false;
       let drawDef = def;
       if (def.gpu) {   // no WebGPU: fall back to the CPU-rasterized sheet
-        drawDef = CATALOG.sheetcpu;
+        drawDef = CATALOG[def.cpu];
         this.note.hidden = false;
-        this.note.textContent = 'WebGPU unavailable: showing the CPU-rasterized sheet density instead.';
+        this.note.textContent = 'WebGPU unavailable: showing the CPU-rasterized ' + (def.p1 ? 'P1 ' : '') + 'sheet density instead.';
       }
       const fv = await this.ensureFV();
       const arr = drawDef.data(eng, P, sub);
@@ -163,15 +163,22 @@ class Slot {
     const eng = this.app.eng;
     const sv = await this.ensureSV();
     this.cvS.hidden = false; this.cvF.hidden = true;
-    sv.setMesh(eng.positions(P), eng.n, 1.0);
+    this.setMeshAndWeights(sv, P);
     this.drawSheetParams(mode, cmap, log);
     this.markStale(false);
+  }
+
+  /** Positions at (D, order) and, for the P1 panel, the vertex densities 1/|J| on the Lagrangian grid. */
+  setMeshAndWeights(sv, P) {
+    const eng = this.app.eng;
+    sv.setMesh(eng.positions(P), eng.n, 1.0);
+    sv.setVertexWeights(this.cfg.def.p1 ? eng.vertexW(P) : null);
   }
 
   drawSheetParams(mode, cmap, log) {
     const S = this.app.S;
     const lo = log ? S.rmin : 0, hi = log ? S.rmax : LIN_MAX;
-    this.sv.draw({ mode, cmap, vmin: lo, vmax: hi, log, wireAlpha: Math.min(0.35, 25 / this.app.eng.n) });
+    this.sv.draw({ mode, cmap, vmin: lo, vmax: hi, log, p1: !!this.cfg.def.p1, wireAlpha: Math.min(0.35, 25 / this.app.eng.n) });
     renderColorbar(this.bar, cmap, lo, hi, { label: 'ρ/ρ̄', log });
   }
 
@@ -182,7 +189,7 @@ class Slot {
   fastUpdate(P) {
     if (!this.isFast() || !this.sv || this.cvS.hidden || !this.app.eng.sim) return false;
     const { sub, cmap, log } = this.cfg;
-    this.sv.setMesh(this.app.eng.positions(P), this.app.eng.n, 1.0);
+    this.setMeshAndWeights(this.sv, P);
     this.drawSheetParams(sub, cmap, log);
     return true;
   }

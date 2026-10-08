@@ -34,6 +34,13 @@ const NOTES = [
       The preimages tile Lagrangian space, so mass is conserved exactly (the mean is 1 to rounding) and no derivative is taken. Before shell crossing it keeps the accuracy of the Legendre inversion in voids and, like the forward sheet, resolves the peaks; afterwards the cell polygons fold and the density follows the single-stream (adhesion) map. Compare it with the sheet and with both Hopf–Cole densities in the <i>Legendre lab</i>, where for small ν (near the grid floor Δx²/4D) the residual dual − sheet is several times smaller than the other two; at larger ν the viscous smoothing of q dominates all three.`,
   },
   {
+    title: 'The P1 sheet: a linear density inside every simplex',
+    html: `The plain sheet gives each Lagrangian simplex (two triangles per cell in 2D, six Kuhn tetrahedra in 3D) the constant density m/|V|, which is first-order accurate and makes the density jump at simplex boundaries.
+      The <i>P1 sheet</i> uses the vertex densities w = 1/|J(q)| at the Lagrangian grid points and the linear (barycentric) interpolant inside each simplex, ρ(x) = (m/|V|) (Σλᵢwᵢ)/mean(wᵢ), where the factor 1/mean(wᵢ) makes every simplex deposit exactly its mass.
+      Mass is therefore conserved exactly, the density is continuous inside a smooth stream and the error is second order in the cell size, so against the exact nLPT density (and against the Hopf–Cole fields) the P1 sheet is a much cleaner reference than the plain one; choose it in the <i>Legendre lab</i> (“sheet reference”).
+      In 2D the GPU panel interpolates w across each triangle in the rasterizer; in 3D the GPU kernel evaluates the barycentric coordinates at every sample point and takes w from a finite-difference Jacobian of the displacement.`,
+  },
+  {
     title: 'One-point PDFs of the density',
     html: `The <i>PDFs</i> section histograms log₁₀(1+δ) cell by cell for every method, once on the raw grid and once after smoothing with a top-hat sphere (a disc in 2D) of adjustable diameter, so the one-point statistics of the sheet, CIC, the Hopf–Cole variants and linear theory can be compared directly.
       Linear theory gives a Gaussian δ and therefore negative densities as soon as the rms contrast approaches one; gravity instead empties the voids towards a minimum density and builds a long high-density tail that is roughly lognormal (Coles &amp; Jones 1991).

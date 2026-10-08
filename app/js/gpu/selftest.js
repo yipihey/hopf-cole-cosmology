@@ -383,6 +383,35 @@ export async function validateLpt(core, gpu, n, { om = 1, order = 4 } = {}) {
       bW.destroy();
     }
     record(tag, `sheet ${order}LPT (${cs.name}): |mean_gpu - mean_wasm|  (means ${(mg / N).toFixed(6)} / ${(mw / N).toFixed(6)})`, Math.abs(mg - mw) / N, 1e-5);
+    // --- P1 sheet (vertex-interpolated, mass-conserving): GPU kernel with the WASM vertex densities, then with the GPU Jacobian
+    {
+      const wW = sim.vertex_density(D, order), pW = sim.sheet_density_p1(D, order, n, 1);
+      const wBuf = device.createBuffer({ size: 4 * N, usage: STORAGE_RW });
+      device.queue.writeBuffer(wBuf, 0, wW);
+      const pG = await g.readField(sheet.density(disp, wBuf));
+      const pRef = Float32Array.from(pW, (v) => v - 1);
+      let m1 = 0, m2 = 0; for (let i = 0; i < N; i++) { m1 += pG[i]; m2 += pW[i]; }
+      record(tag, `P1 sheet ${order}LPT (${cs.name}), WASM vertex densities: rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(pG, pW) / rms(pRef), cs.D < dscO ? 1e-4 : 1e-3);
+      record(tag, `P1 sheet ${order}LPT (${cs.name}): |mean_gpu - mean_wasm|  (means ${(m1 / N).toFixed(6)} / ${(m2 / N).toFixed(6)}; plain sheet ${(mg / N).toFixed(6)})`, Math.abs(m1 - m2) / N, 1e-5);
+      if (cs.D >= dscO) {
+        const pw = sim.positions(D, order), psiW = new Float32Array(3 * N);
+        for (let i = 0; i < N; i++) { const ix = Math.floor(i / (n * n)), iy = Math.floor(i / n) % n, iz = i % n; psiW[3 * i] = pw[3 * i] - ix / n; psiW[3 * i + 1] = pw[3 * i + 1] - iy / n; psiW[3 * i + 2] = pw[3 * i + 2] - iz / n; }
+        const bW = device.createBuffer({ size: 12 * N, usage: STORAGE_RW });
+        device.queue.writeBuffer(bW, 0, psiW);
+        const pA = await g.readField(sheet.density(bW, wBuf));
+        record(tag, `P1 sheet ${order}LPT (${cs.name}), WASM positions and vertex densities as input: rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(pA, pW) / rms(pRef), 1e-4);
+        bW.destroy();
+      }
+      // GPU-side vertex densities (4th-order finite-difference Jacobian) vs the spectral WASM ones, and the resulting P1 density
+      const wG = await g.readField(sheet.vertexWeights(disp));
+      const lw = (a) => Float32Array.from(a, (v) => Math.log10(v));
+      record(tag, `vertex densities ${order}LPT (${cs.name}), GPU finite-difference vs WASM spectral Jacobian: rms(log10 w_gpu - log10 w_wasm)`, rmsDiff(lw(wG), lw(wW)), cs.D < dscO ? 1e-4 : 1e-3);
+      const pG2 = await g.readField(sheet.density(disp, g.buf('sheet-w')));
+      record(tag, `P1 sheet ${order}LPT (${cs.name}), GPU vertex densities: rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(pG2, pW) / rms(pRef), cs.D < dscO ? 1e-4 : 1e-3);
+      let m3 = 0; for (let i = 0; i < N; i++) m3 += pG2[i];
+      record(tag, `P1 sheet ${order}LPT (${cs.name}), GPU vertex densities: |mean_gpu - mean_wasm|`, Math.abs(m3 - m2) / N, 1e-5);
+      wBuf.destroy();
+    }
   }
   // velocity jump
   const du = await lpt.velocityJump();

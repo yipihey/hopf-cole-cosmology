@@ -16,7 +16,7 @@
 <body>
   <h1>WebGPU compute self-test</h1>
   <p>Validates <code>js/gpu/fft3d.js</code>, <code>cosmo3d.js</code>, and the GPU-resident nLPT pipeline (<code>lpt3d.js</code>: term build,
-     D<sub>sc</sub>, Legendre inversion with the transverse correction; <code>sheet3d.js</code>: tetrahedral sheet; the dual-sheet density
+     D<sub>sc</sub>, Legendre inversion with the transverse correction; <code>sheet3d.js</code>: tetrahedral sheet and its P1 (vertex-interpolated) variant; the dual-sheet density
      of the Hopf&ndash;Cole inverse map in <code>cosmo3d.js</code>) against the WASM core and times
      each stage. URL options (comma lists of grid sizes): <code>?auto=1&amp;val=32,64&amp;bench=64,128&amp;lval=32,64&amp;lbench=64,128&amp;wo128=4</code>;
      <code>val</code>/<code>bench</code>: FFT, positions, CIC, Hopf&ndash;Cole, spectra; <code>lval</code>: nLPT checks (EdS 4LPT and
