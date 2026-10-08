@@ -11,6 +11,16 @@ use crate::grid::Grid;
 /// `pos` is interleaved (x, y) in box units, unwrapped.  Output: ρ/ρ̄ on an
 /// `ne × ne` Eulerian grid.
 pub fn sheet_density_2d(grid: &Grid, pos: &[f32], ne: usize, ss: usize) -> Vec<f32> {
+    sheet_density_2d_weighted(grid, pos, None, ne, ss)
+}
+
+/// Like `sheet_density_2d`, but with a density *shape* interpolated linearly
+/// from vertex values `wv` (e.g. 1/|J| at the Lagrangian grid points): inside
+/// each triangle ρ(x) = c · Σ_i λ_i w_i with barycentric λ and the constant c
+/// chosen so that the triangle still deposits exactly its mass
+/// (∫ linear = |A| · mean(w_i)  ⇒  c = m / (|A| · mean(w))).  Second-order
+/// accurate where the plain sheet is first order; exactly mass conserving.
+pub fn sheet_density_2d_weighted(grid: &Grid, pos: &[f32], wv: Option<&[f32]>, ne: usize, ss: usize) -> Vec<f32> {
     assert_eq!(grid.dim, 2);
     let n = grid.n;
     let l = grid.l;
@@ -24,6 +34,7 @@ pub fn sheet_density_2d(grid: &Grid, pos: &[f32], ne: usize, ss: usize) -> Vec<f
         let idx = ((i % n) * n + (j % n)) * 2;
         (pos[idx] as f64 + oi, pos[idx + 1] as f64 + oj)
     };
+    let wgt = |i: usize, j: usize| -> f64 { match wv { Some(w) => w[(i % n) * n + (j % n)] as f64, None => 1.0 } };
     for i in 0..n {
         for j in 0..n {
             let oi = if i + 1 == n { l } else { 0.0 };
@@ -32,8 +43,9 @@ pub fn sheet_density_2d(grid: &Grid, pos: &[f32], ne: usize, ss: usize) -> Vec<f
             let p10 = get(i + 1, j, oi, 0.0);
             let p01 = get(i, j + 1, 0.0, oj);
             let p11 = get(i + 1, j + 1, oi, oj);
-            for tri in [[p00, p10, p11], [p00, p11, p01]] {
-                rasterize_tri(&tri, mass, ne, dxe, l, ss, wsub, &mut rho);
+            let (w00, w10, w01, w11) = (wgt(i, j), wgt(i + 1, j), wgt(i, j + 1), wgt(i + 1, j + 1));
+            for (tri, w) in [([p00, p10, p11], [w00, w10, w11]), ([p00, p11, p01], [w00, w11, w01])] {
+                rasterize_tri(&tri, if wv.is_some() { Some(w) } else { None }, mass, ne, dxe, l, ss, wsub, &mut rho);
             }
         }
     }
@@ -41,7 +53,7 @@ pub fn sheet_density_2d(grid: &Grid, pos: &[f32], ne: usize, ss: usize) -> Vec<f
 }
 
 #[allow(clippy::too_many_arguments)]
-fn rasterize_tri(t: &[(f64, f64); 3], mass: f64, ne: usize, dxe: f64, l: f64, ss: usize, wsub: f64, rho: &mut [f64]) {
+fn rasterize_tri(t: &[(f64, f64); 3], wv: Option<[f64; 3]>, mass: f64, ne: usize, dxe: f64, l: f64, ss: usize, wsub: f64, rho: &mut [f64]) {
     let (x0, y0) = t[0];
     let (x1, y1) = t[1];
     let (x2, y2) = t[2];
@@ -50,6 +62,8 @@ fn rasterize_tri(t: &[(f64, f64); 3], mass: f64, ne: usize, dxe: f64, l: f64, ss
         return;
     }
     let dens = mass / (0.5 * area2.abs());
+    // linear shape: ρ = dens · (λ·w) / mean(w)   (integrates to the triangle mass)
+    let (w, wmean) = match wv { Some(w) => { let m = (w[0] + w[1] + w[2]) / 3.0; if m > 0.0 { (w, m) } else { ([1.0, 1.0, 1.0], 1.0) } } None => ([1.0, 1.0, 1.0], 1.0) };
     let xmin = x0.min(x1).min(x2);
     let xmax = x0.max(x1).max(x2);
     let ymin = y0.min(y1).min(y2);
@@ -64,7 +78,7 @@ fn rasterize_tri(t: &[(f64, f64); 3], mass: f64, ne: usize, dxe: f64, l: f64, ss
         let iw = i.rem_euclid(ne as i64) as usize;
         for j in j0..=j1 {
             let jw = j.rem_euclid(ne as i64) as usize;
-            let mut cov = 0usize;
+            let mut acc = 0.0f64;
             for si in 0..ss {
                 let px = (i as f64 + (si as f64 + 0.5) / ss as f64) * dxe;
                 if px < xmin || px > xmax {
@@ -80,12 +94,12 @@ fn rasterize_tri(t: &[(f64, f64); 3], mass: f64, ne: usize, dxe: f64, l: f64, ss
                     let w1 = ((x2 - px) * (y0 - py) - (x0 - px) * (y2 - py)) * inv;
                     let w2 = 1.0 - w0 - w1;
                     if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
-                        cov += 1;
+                        acc += (w0 * w[0] + w1 * w[1] + w2 * w[2]) / wmean;
                     }
                 }
             }
-            if cov > 0 {
-                rho[iw * ne + jw] += dens * cov as f64 * wsub;
+            if acc > 0.0 {
+                rho[iw * ne + jw] += dens * acc * wsub;
             }
         }
     }
@@ -142,6 +156,11 @@ pub fn cic_window(grid: &Grid, idx: usize) -> f64 {
 /// m/|V| (sum over streams).  `pos` interleaved (x,y,z), unwrapped.  Output
 /// ρ/ρ̄ on an `ne³` grid; `ss` = supersampling per axis.
 pub fn sheet_density_3d(grid: &Grid, pos: &[f32], ne: usize, ss: usize) -> Vec<f32> {
+    sheet_density_3d_weighted(grid, pos, None, ne, ss)
+}
+
+/// 3D version of `sheet_density_2d_weighted` (linear shape from vertex values inside each tetrahedron).
+pub fn sheet_density_3d_weighted(grid: &Grid, pos: &[f32], wv: Option<&[f32]>, ne: usize, ss: usize) -> Vec<f32> {
     assert_eq!(grid.dim, 3);
     let n = grid.n;
     let l = grid.l;
@@ -164,12 +183,15 @@ pub fn sheet_density_3d(grid: &Grid, pos: &[f32], ne: usize, ss: usize) -> Vec<f
                 let ok = if k + 1 == n { l } else { 0.0 };
                 // cube corners indexed by bits (x,y,z)
                 let mut c = [[0.0f64; 3]; 8];
+                let mut cw = [1.0f64; 8];
                 for b in 0..8 {
                     let (bx, by, bz) = (b & 1, (b >> 1) & 1, (b >> 2) & 1);
                     c[b] = get(i + bx, j + by, k + bz, [if bx == 1 { oi } else { 0.0 }, if by == 1 { oj } else { 0.0 }, if bz == 1 { ok } else { 0.0 }]);
+                    if let Some(w) = wv { cw[b] = w[(((i + bx) % n) * n + ((j + by) % n)) * n + ((k + bz) % n)] as f64; }
                 }
                 for t in TETS.iter() {
-                    rasterize_tet(&[c[t[0]], c[t[1]], c[t[2]], c[t[3]]], mass, ne, dxe, ss, wsub, &mut rho);
+                    let w = if wv.is_some() { Some([cw[t[0]], cw[t[1]], cw[t[2]], cw[t[3]]]) } else { None };
+                    rasterize_tet(&[c[t[0]], c[t[1]], c[t[2]], c[t[3]]], w, mass, ne, dxe, ss, wsub, &mut rho);
                 }
             }
         }
@@ -177,7 +199,7 @@ pub fn sheet_density_3d(grid: &Grid, pos: &[f32], ne: usize, ss: usize) -> Vec<f
     rho.iter().map(|&v| v as f32).collect()
 }
 
-fn rasterize_tet(p: &[[f64; 3]; 4], mass: f64, ne: usize, dxe: f64, ss: usize, wsub: f64, rho: &mut [f64]) {
+fn rasterize_tet(p: &[[f64; 3]; 4], wv: Option<[f64; 4]>, mass: f64, ne: usize, dxe: f64, ss: usize, wsub: f64, rho: &mut [f64]) {
     // signed volume ×6
     let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
     let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
@@ -185,6 +207,7 @@ fn rasterize_tet(p: &[[f64; 3]; 4], mass: f64, ne: usize, dxe: f64, ss: usize, w
     let det = e1[0] * (e2[1] * e3[2] - e2[2] * e3[1]) - e1[1] * (e2[0] * e3[2] - e2[2] * e3[0]) + e1[2] * (e2[0] * e3[1] - e2[1] * e3[0]);
     if det.abs() < 1e-300 { return; }
     let dens = mass / (det.abs() / 6.0);
+    let (w, wmean) = match wv { Some(w) => { let m = (w[0] + w[1] + w[2] + w[3]) / 4.0; if m > 0.0 { (w, m) } else { ([1.0; 4], 1.0) } } None => ([1.0; 4], 1.0) };
     let inv = 1.0 / det;
     // inverse of the edge matrix (columns e1,e2,e3) for barycentric coordinates
     let m = [
@@ -204,7 +227,7 @@ fn rasterize_tet(p: &[[f64; 3]; 4], mass: f64, ne: usize, dxe: f64, ss: usize, w
             let jw = cj.rem_euclid(ne_i) as usize;
             for ck in c0[2]..=c1[2] {
                 let kw = ck.rem_euclid(ne_i) as usize;
-                let mut cov = 0usize;
+                let mut acc = 0.0f64;
                 for si in 0..ss { let px = (ci as f64 + (si as f64 + 0.5) / ss as f64) * dxe; if px < lo[0] || px > hi[0] { continue; }
                     for sj in 0..ss { let py = (cj as f64 + (sj as f64 + 0.5) / ss as f64) * dxe; if py < lo[1] || py > hi[1] { continue; }
                         for sk in 0..ss { let pz = (ck as f64 + (sk as f64 + 0.5) / ss as f64) * dxe; if pz < lo[2] || pz > hi[2] { continue; }
@@ -212,11 +235,14 @@ fn rasterize_tet(p: &[[f64; 3]; 4], mass: f64, ne: usize, dxe: f64, ss: usize, w
                             let b1 = m[0][0] * r[0] + m[0][1] * r[1] + m[0][2] * r[2];
                             let b2 = m[1][0] * r[0] + m[1][1] * r[1] + m[1][2] * r[2];
                             let b3 = m[2][0] * r[0] + m[2][1] * r[1] + m[2][2] * r[2];
-                            if b1 >= 0.0 && b2 >= 0.0 && b3 >= 0.0 && b1 + b2 + b3 <= 1.0 { cov += 1; }
+                            if b1 >= 0.0 && b2 >= 0.0 && b3 >= 0.0 && b1 + b2 + b3 <= 1.0 {
+                                let b0 = 1.0 - b1 - b2 - b3;
+                                acc += (b0 * w[0] + b1 * w[1] + b2 * w[2] + b3 * w[3]) / wmean;
+                            }
                         }
                     }
                 }
-                if cov > 0 { rho[(iw * ne + jw) * ne + kw] += dens * cov as f64 * wsub; }
+                if acc > 0.0 { rho[(iw * ne + jw) * ne + kw] += dens * acc * wsub; }
             }
         }
     }

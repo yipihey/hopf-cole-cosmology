@@ -512,3 +512,37 @@ fn dual_sheet_density_3d() {
     assert!((mean - 1.0).abs() < 1e-5, "mean {}", mean);
     assert!((e / nn).sqrt() < 0.3);
 }
+
+#[test]
+fn sheet_p1_interpolated() {
+    use hcc_core::ics::Preset;
+    // plane wave: compare the plain and the P1 sheet against the exact cell-averaged density
+    for &n in &[128usize, 256] {
+        let mut c = Cosmo::new(2, n, 1.0);
+        c.set_ic_preset(Preset::PlaneWaves { modes: vec![([2, 0, 0], 1.0, 0.0)] }, 0.0, 0.0);
+        c.build_lpt(1);
+        let (a, k, d) = (1.0f64, 2.0 * std::f64::consts::PI * 2.0, 0.6f64);
+        let plain = c.sheet_density(d, 1, n, 4);
+        let p1 = c.sheet_density_p1(d, 1, n, 4, 1e4);
+        let qof = |x: f64| { let mut q = x; for _ in 0..60 { let f = q - d * a * (k * q).sin() / k - x; let fp = 1.0 - d * a * (k * q).cos(); q -= f / fp; } q };
+        let (mut e0, mut e1, mut nn) = (0.0, 0.0, 0.0);
+        for i in 0..n {
+            let exact = (qof((i + 1) as f64 / n as f64) - qof(i as f64 / n as f64)) * n as f64;
+            e0 += (plain[i * n] as f64 - exact).powi(2); e1 += (p1[i * n] as f64 - exact).powi(2); nn += exact * exact;
+        }
+        let m0: f64 = plain.iter().map(|&v| v as f64).sum::<f64>() / plain.len() as f64;
+        let m1: f64 = p1.iter().map(|&v| v as f64).sum::<f64>() / p1.len() as f64;
+        println!("n={n}: plain sheet rel err {:.3e} (mean {m0:.5}), P1 sheet rel err {:.3e} (mean {m1:.5})", (e0 / nn).sqrt(), (e1 / nn).sqrt());
+        assert!((m1 - 1.0).abs() < 2e-3, "P1 mass {}", m1);
+        assert!(e1 < 0.3 * e0, "P1 should be much more accurate than the plain sheet");
+    }
+    // 3D: mass conserved
+    let mut c = Cosmo::new(3, 32, 1.0);
+    c.set_ic_gaussian(PkShape::PowerLaw { n: -1.0 }, 0.08, 5, 1.0);
+    c.build_lpt(2);
+    let d = 0.7 * c.shell_crossing(2);
+    let p1 = c.sheet_density_p1(d, 2, 32, 1, 1e4);
+    let m: f64 = p1.iter().map(|&v| v as f64).sum::<f64>() / p1.len() as f64;
+    println!("3D P1 sheet mean {m:.4}");
+    assert!((m - 1.0).abs() < 0.03);
+}

@@ -134,9 +134,16 @@ is the *sum over all simplices covering it*: this is @eq-density-jacobian
 made discrete, multi-streaming included, with no free parameters and no
 shot noise. The laboratory renders the triangles on the GPU with additive
 blending, so you literally see the sheet fold; in 3D it rasterizes the six
-Kuhn tetrahedra of every Lagrangian cell on the CPU (point-sampled at the
-Eulerian cell centres), which is the quantitative counterpart of the
-cloud-in-cell deposit.
+Kuhn tetrahedra of every Lagrangian cell (point-sampled at the Eulerian
+cell centres), which is the quantitative counterpart of the cloud-in-cell
+deposit. A simple refinement makes the sheet second-order accurate: instead
+of one density per simplex, interpolate the vertex densities $1/|J(\mathbf q)|$
+linearly inside it and rescale each simplex's profile so that it still
+deposits exactly its mass (a linear function integrates to the volume times
+the mean of its vertex values, so the rescaling is just
+$m/(|V|\,\overline{\rho_v})$). This "P1 sheet" keeps the exact mass
+bookkeeping and resolves the density gradient inside each cell; it is
+available alongside the plain sheet in the laboratory.
 
 ```{=html}
 <div class="hcc-widget" data-widget="lptorders"></div>

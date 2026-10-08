@@ -65,6 +65,18 @@ impl CosmoSim {
         if !self.ok_order(1) { return vec![]; }
         self.inner.sheet_density(d, order, ne, ss)
     }
+    /// Sheet density with linear (P1) interpolation of the vertex densities 1/|J| inside each simplex, mass conserving.
+    pub fn sheet_density_p1(&self, d: f64, order: usize, ne: usize, ss: usize) -> Vec<f32> {
+        if !self.ok_order(1) { return vec![]; }
+        self.inner.sheet_density_p1(d, order, ne, ss, 1e4)
+    }
+    /// Vertex densities 1/|J(q)| on the Lagrangian grid at D (clamped at 1e4), for GPU-side P1 sheets.
+    pub fn vertex_density(&self, d: f64, order: usize) -> Vec<f32> {
+        if !self.ok_order(1) { return vec![]; }
+        let mut j = vec![0.0f64; self.inner.grid.size];
+        self.inner.lpt_ref().jacobian(d, order, &mut j);
+        j.iter().map(|&v| (1.0 / v.abs().max(1e-4)) as f32).collect()
+    }
     pub fn cic_density(&self, d: f64, order: usize, ne: usize) -> Vec<f32> { if !self.ok_order(1) { return vec![]; } self.inner.cic_density(d, order, ne) }
     pub fn linear_delta(&mut self, d: f64) -> Vec<f32> { self.inner.linear_delta(d) }
     pub fn phi0(&self) -> Vec<f32> { self.inner.phi0.iter().map(|&v| v as f32).collect() }

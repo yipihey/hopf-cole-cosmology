@@ -129,6 +129,16 @@ impl Cosmo {
         let pos = self.positions(d, order);
         if self.grid.dim == 3 { sheet::sheet_density_3d(&self.grid, &pos, ne, ss) } else { sheet::sheet_density_2d(&self.grid, &pos, ne, ss) }
     }
+    /// Sheet density with a linear (P1) shape inside each simplex, from the
+    /// vertex densities 1/|J(q)| (clamped at `wmax`), renormalized per simplex so
+    /// that mass is conserved exactly.
+    pub fn sheet_density_p1(&self, d: f64, order: usize, ne: usize, ss: usize, wmax: f64) -> Vec<f32> {
+        let pos = self.positions(d, order);
+        let mut j = vec![0.0f64; self.grid.size];
+        self.lpt_ref().jacobian(d, order, &mut j);
+        let w: Vec<f32> = j.iter().map(|&v| (1.0 / v.abs().max(1.0 / wmax)) as f32).collect();
+        if self.grid.dim == 3 { sheet::sheet_density_3d_weighted(&self.grid, &pos, Some(&w), ne, ss) } else { sheet::sheet_density_2d_weighted(&self.grid, &pos, Some(&w), ne, ss) }
+    }
     pub fn cic_density(&self, d: f64, order: usize, ne: usize) -> Vec<f32> {
         let pos = self.positions(d, order);
         sheet::cic_density(self.grid.dim, &pos, self.grid.size, self.grid.l, ne)
