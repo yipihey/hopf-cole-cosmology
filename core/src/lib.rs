@@ -8,6 +8,7 @@ pub mod growth;
 pub mod hopfcole;
 pub mod ics;
 pub mod lpt;
+pub mod r3d;
 pub mod rng;
 pub mod sheet;
 pub mod spectra;
