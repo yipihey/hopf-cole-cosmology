@@ -75,6 +75,17 @@ impl CosmoSim {
         if !self.ok_order(1) { return vec![]; }
         self.inner.sheet_density_exact(d, order, ne, p1, 1e4)
     }
+    /// Direct (deposit-free) sheet spectrum: flat [k..., P..., N...].
+    pub fn direct_spectrum(&self, d: f64, order: usize, p1: bool, nbins: usize, per_bin: usize, seed: u32) -> Vec<f64> {
+        if !self.ok_order(1) { return vec![]; }
+        let s = self.inner.direct_spectrum(d, order, p1, nbins, per_bin, seed as u64, 1e4);
+        let mut out = s.k.clone(); out.extend(s.p.iter()); out.extend(s.nmodes.iter()); out
+    }
+    /// NUFFT density (ρ/ρ̄) of the Fourier-refined map.
+    pub fn nufft_density(&mut self, d: f64, order: usize, refine: usize, ne: usize) -> Vec<f32> {
+        if !self.ok_order(1) { return vec![]; }
+        self.inner.nufft_density(d, order, refine, ne)
+    }
     /// Vertex densities 1/|J(q)| on the Lagrangian grid at D (clamped at 1e4), for GPU-side P1 sheets.
     pub fn vertex_density(&self, d: f64, order: usize) -> Vec<f32> {
         if !self.ok_order(1) { return vec![]; }

@@ -2,6 +2,7 @@
 //! equation, nLPT phase-space sheets and the Hopf–Cole spectral solver.
 
 pub mod burgers1d;
+pub mod direct;
 pub mod fft;
 pub mod grid;
 pub mod growth;
@@ -139,6 +140,38 @@ impl Cosmo {
         self.lpt_ref().jacobian(d, order, &mut j);
         let w: Vec<f32> = j.iter().map(|&v| (1.0 / v.abs().max(1.0 / wmax)) as f32).collect();
         if self.grid.dim == 3 { sheet::sheet_density_3d_weighted(&self.grid, &pos, Some(&w), ne, ss) } else { sheet::sheet_density_2d_weighted(&self.grid, &pos, Some(&w), ne, ss) }
+    }
+    /// Deposit-free direct spectrum of the sheet (divided differences), P0 or P1.
+    pub fn direct_spectrum(&self, d: f64, order: usize, p1: bool, nbins: usize, per_bin: usize, seed: u64, wmax: f64) -> Spectrum {
+        let pos = self.positions(d, order);
+        let w: Option<Vec<f32>> = if p1 {
+            let mut j = vec![0.0f64; self.grid.size];
+            self.lpt_ref().jacobian(d, order, &mut j);
+            Some(j.iter().map(|&v| (1.0 / v.abs().max(1.0 / wmax)) as f32).collect())
+        } else { None };
+        direct::direct_spectrum(&self.grid, &pos, w.as_deref(), nbins, per_bin, seed)
+    }
+    /// NUFFT density of the Fourier-refined map (refine ≥ 1), on the `ne` grid.
+    pub fn nufft_density(&mut self, d: f64, order: usize, refine: usize, ne: usize) -> Vec<f32> {
+        let dim = self.grid.dim;
+        let r = refine.max(1);
+        // displacement components on the fine grid
+        let mut comps: Vec<Vec<f64>> = Vec::new();
+        let mut fine = self.grid.clone();
+        for a in 0..dim {
+            let disp = self.lpt_ref().displacement_component(d, order, a);
+            let disp64: Vec<f64> = disp.iter().map(|&v| v as f64).collect();
+            let (g, up) = hopfcole::upsample_real(&self.grid, &mut self.eng, &disp64, r);
+            fine = g; comps.push(up);
+        }
+        let npts = fine.size;
+        let dxf = fine.dx();
+        let mut pos = vec![0.0f32; npts * dim];
+        for idx in 0..npts {
+            let ijk = fine.unravel(idx);
+            for a in 0..dim { pos[idx * dim + a] = (ijk[a] as f64 * dxf + comps[a][idx]) as f32; }
+        }
+        direct::nufft_density(dim, &pos, npts, self.grid.l, ne, 1.25, 5)
     }
     /// Exact (r3d-voxelized, conservative) sheet deposit, P0 or P1 (vertex 1/|J| interpolated).
     pub fn sheet_density_exact(&self, d: f64, order: usize, ne: usize, p1: bool, wmax: f64) -> Vec<f32> {
