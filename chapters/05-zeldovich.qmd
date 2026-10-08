@@ -170,6 +170,25 @@ order the small transverse part $\boldsymbol\Psi_T$ (about $10^{-3}$ of the
 longitudinal one) breaks the gradient structure; it can be restored to first
 order by correcting the inverse map, $\mathbf q(\mathbf x) \simeq \mathbf q_L(\mathbf x) - \boldsymbol\Psi_T(\mathbf q_L(\mathbf x))$.
 
+::: {.callout-note title="Where this sits in the literature"}
+The two ingredients are classical, their combination appears not to be. That
+the inviscid adhesion model is the Legendre transform (convex hull) of the
+Zel'dovich potential is the "geometrical adhesion model"
+[@vergassola1994; @valageas2011; @hidding2012], recently analysed rigorously
+by @liu2025 through Monge–Ampère measures. That the 2LPT map is still a
+gradient map ("Brenier property") was noted in the optimal-transport
+reconstruction literature [@brenier2003; @frisch2012], where it is used for
+the *inverse* problem of recovering initial conditions. Earlier attempts to
+push adhesion beyond Zel'dovich worked instead on the dynamics: a viscosity
+expansion of the Hopf–Cole equation with a source term [@menci2002], or
+modified fluid models with Lagrangian perturbative expansions
+[@buchert2005]. Using the $n$LPT displacement potential as the input to the
+Hopf–Lax/Hopf–Cole construction, as a forward Eulerian density estimator
+with the transverse correction at third order and beyond, we did not find
+in a search of ADS and the web (October 2026); treat it as a conjecture of
+novelty rather than a verified one.
+:::
+
 After shell crossing the two descriptions part ways deliberately: the sheet
 sums $1/|J|$ over all streams, which is the collisionless truth, while the
 minimum in @eq-legendre keeps one stream per point and collects the rest in
