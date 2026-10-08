@@ -15,6 +15,7 @@ import { Fields2D } from './fields2d.js';
 import { Fields3D } from './fields3d.js';
 import { Spectra } from './spectra.js';
 import { LegendreLab } from './legendre.js';
+import { PdfLab } from './pdfs.js';
 import { buildExplain } from './explain.js';
 import { el, tick, paint, fmtMs } from './dom.js';
 
@@ -41,7 +42,7 @@ export class Lab {
     this.timers = {};
     this.dirty = false;
     this.fields = null; this.fieldsMode = 0; this.fieldsN = 0;
-    this.spectra = null; this.legendre = null;
+    this.spectra = null; this.legendre = null; this.pdfs = null;
     this.gpu = false; this.gpuCompute = false; this.backend = 'canvas2d';
     this.bench = null; this.decision = null; this.firstRunDone = false; this.lastError = null; this.wasmExports = null;
     window.addEventListener('hashchange', () => { if (location.hash.replace(/^#/, '') !== encodeHash(this.S)) location.reload(); });
@@ -63,6 +64,7 @@ export class Lab {
     this.buildVisChips();
     this.spectra = new Spectra(this, $('spectra-host'));
     this.legendre = new LegendreLab(this, $('legendre-host'));
+    this.pdfs = new PdfLab(this, $('pdfs-host'));
     buildExplain($('explain-host'));
     this.applyVisibility();
     this.ensureFields(this.S);
@@ -351,6 +353,7 @@ export class Lab {
     this.controls.syncAll();
     this.spectra.syncMode();
     this.legendre.syncMode();
+    this.pdfs.syncMode();
     this.hashChanged();
     this.markStale(true);
     this.ensureFields(S);
@@ -376,12 +379,14 @@ export class Lab {
     if (this.fields) this.fields.markStale(b, keepFast);
     if (this.spectra) this.spectra.markStale(b);
     if (this.legendre) this.legendre.markStale(b);
+    if (this.pdfs) this.pdfs.markStale(b);
   }
 
   markStaleHc(b) {
     if (this.fields && this.fields.markStaleHc) this.fields.markStaleHc(b);
     if (this.spectra) this.spectra.markStale(b);
     if (this.legendre) this.legendre.markStale(b);
+    if (this.pdfs) this.pdfs.markStale(b);
   }
 
   /** Key of everything the non-Hopf-Cole results depend on (a nu change leaves it unchanged). */
@@ -412,6 +417,7 @@ export class Lab {
     if (this.visible('f')) tasks.push(...this.fields.tasks(P, true).map((t) => ({ ...t, heavy: false })));
     if (this.visible('s')) tasks.push(...this.spectra.tasks(P).map((t) => ({ ...t, heavy: false })));
     if (this.visible('l')) tasks.push(...this.legendre.tasks(P).map((t) => ({ ...t, heavy: false })));
+    if (this.visible('p')) tasks.push(...this.pdfs.tasks(P, true).map((t) => ({ ...t, heavy: false })));
     tasks.push({ label: 'readouts', fn: () => this.refreshReadouts() });
     const ok = await this.runTasks(tasks, gen);
     if (gen !== this.runGen) return;
@@ -425,7 +431,7 @@ export class Lab {
 
   buildVisChips() {
     const host = $('lab-vis');
-    const defs = [['f', 'Fields'], ['s', 'Spectra'], ['l', 'Legendre lab'], ['e', 'Explain']];
+    const defs = [['f', 'Fields'], ['s', 'Spectra'], ['l', 'Legendre lab'], ['p', 'PDFs'], ['e', 'Explain']];
     this.visCbs = {};
     el('span', 'hcc-label', host, 'Show:');
     for (const [k, label] of defs) {
@@ -437,7 +443,7 @@ export class Lab {
         this.S.vis = defs.map(([q]) => q).filter((q) => this.visCbs[q].checked).join('');
         this.hashChanged();
         this.applyVisibility();
-        if (cb.checked && this.eng.sim && (k === 'f' || k === 's' || k === 'l')) this.runSection(k);
+        if (cb.checked && this.eng.sim && (k === 'f' || k === 's' || k === 'l' || k === 'p')) this.runSection(k);
       });
     }
   }
@@ -446,6 +452,7 @@ export class Lab {
     $('sec-fields').hidden = !v.includes('f');
     $('sec-spectra').hidden = !v.includes('s');
     $('sec-legendre').hidden = !v.includes('l');
+    $('sec-pdfs').hidden = !v.includes('p');
     $('sec-explain').hidden = !v.includes('e');
   }
   visible(k) { return this.S.vis.includes(k); }
@@ -521,6 +528,7 @@ export class Lab {
     }
     if (this.visible('s')) tasks.push(...this.spectra.tasks(P));
     if (this.visible('l')) tasks.push(...this.legendre.tasks(P));
+    if (this.visible('p')) tasks.push(...this.pdfs.tasks(P));
     tasks.push({ label: 'shell-crossing times', heavy: heavy3 && !gpuOn && this.eng.peek(['dsc', P.order]) === undefined,
       fn: async () => { await this.eng.needDsc(P); this.eng.dsc(P.order); this.eng.dsc(1); this.refreshReadouts(); } });
 
@@ -546,9 +554,16 @@ export class Lab {
   async runSection(k) {
     const gen = this.runGen;
     const P = this.P;
-    const tasks = k === 'f' ? this.fields.tasks(P) : k === 'l' ? this.legendre.tasks(P) : this.spectra.tasks(P);
+    const tasks = k === 'f' ? this.fields.tasks(P) : k === 'l' ? this.legendre.tasks(P) : k === 'p' ? this.pdfs.tasks(P) : this.spectra.tasks(P);
     await this.runTasks(tasks, gen);
     if (gen === this.runGen) { if (this.lastError) this.setStatus(this.lastError, 'err'); else this.setStatus('ready'); this.showTimings(); }
+  }
+
+  /** The top-hat diameter changed: re-smooth and redraw (everything else is cached). */
+  runPdfs() {
+    if (!this.eng.sim || this.eng.dim !== this.S.mode || !this.visible('p')) return;
+    this.P.pd = this.S.pd;
+    this.runSection('p');
   }
 
   runSpectra() { if (this.eng.sim && this.eng.dim === this.S.mode && this.visible('s')) this.runSection('s'); }

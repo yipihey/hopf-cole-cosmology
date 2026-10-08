@@ -35,7 +35,7 @@ export function makeDefaults(mode = 2) {
     perf: 'auto',           // performance preset: auto (decided after the GPU probe) | lite | full
     om: 1,                  // flat LCDM matter density (1 = EdS)
     // layout
-    vis: 'fs',              // visible sections: f = fields, s = spectra, l = Legendre lab, e = explain
+    vis: 'fs',              // visible sections: f = fields, s = spectra, l = Legendre lab, p = PDFs, e = explain
     // 2D field panels: [kind, sub, cmap, log]  ('' = default)
     slots: [[ENV.lite ? 'sheetcpu' : 'sheetgpu', ENV.lite ? '' : 'both', '', ''], ['hc', '', '', ''], ['fabs', 'sheet', '', ''], ['fphase', 'sheet', '', '']],
     same: true, rmin: 0.1, rmax: 30,
@@ -44,6 +44,8 @@ export function makeDefaults(mode = 2) {
     c1: 'inferno', c2: 'magma', c3: 'viridis', c4: 'twilight', l1: true, l2: true,
     // spectra
     ser: mode === 3 ? ['lin', 'cic', 'hc', 'spt'] : ['lin', 'sheet', 'hc', 'spt'], km: 30,
+    // PDFs: top-hat diameter in grid cells
+    pd: 10,
   };
 }
 
@@ -98,6 +100,7 @@ const SCHEMA = [
   ['l1', 'l1', 'bool'], ['l2', 'l2', 'bool'],
   ['ser', 'se', 'list'],
   ['km', 'km', 'num', [1, 5000]],
+  ['pd', 'pd', 'int', [2, 64]],
 ];
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);

@@ -21,6 +21,7 @@
 //   st = await g.potentialStats(name)                         -> {gmax, range} of a potential buffer, measured on the GPU
 //   {k, p, n} = await g.powerSpectrum(field, nbins, deconvolveCic [, offset])      Float64Array each
 //   {amp, phase} = await g.fourierMaps(field [, offset])      Float32Array n^2, fft-shifted [ikx*n + iky]
+//   delta_s = await g.smoothTophat(field, radiusCells [, offset, dim])   Float32Array n^3: top-hat (sphere / disc) smoothed (field - offset)
 //   an = await g.analyze(field, {nbins, offset, maps, cross}) -> one FFT, everything at once (see below)
 //   ref = await g.setReference(delta0)                        FFT of a reference field (cross spectra)
 //   arr = await g.readField(buf [, count])                    Float32Array
@@ -194,6 +195,46 @@ fn hc_delta(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgrou
   hout[i] = det - 1.0;
 }
 
+// ---------------------------------------------------------------- top-hat smoothing (Fourier-space window, in place on the spectrum)
+struct THU { count: u32, n: u32, dim: u32, p1: u32, r: f32 };
+@group(0) @binding(0) var<uniform> thu: THU;
+@group(0) @binding(1) var<storage, read_write> thf: array<vec2<f32>>;
+
+// Bessel J1 (Numerical Recipes rational / asymptotic approximations; same as the CPU window in core/src/spectra.rs)
+fn bessj1(x: f32) -> f32 {
+  let ax = abs(x);
+  if (ax < 8.0) {
+    let y = x * x;
+    let a1 = x * (72362614232.0 + y * (-7895059235.0 + y * (242396853.1 + y * (-2972611.439 + y * (15704.48260 + y * (-30.16036606))))));
+    let a2 = 144725228442.0 + y * (2300535178.0 + y * (18583304.74 + y * (99447.43394 + y * (376.9991397 + y))));
+    return a1 / a2;
+  }
+  let z = 8.0 / ax;
+  let y = z * z;
+  let xx = ax - 2.356194491;
+  let a1 = 1.0 + y * (0.183105e-2 + y * (-0.3516396496e-4 + y * (0.2457520174e-5 + y * (-0.240337019e-6))));
+  let a2 = 0.04687499995 + y * (-0.2002690873e-3 + y * (0.8449199096e-5 + y * (-0.88228987e-6 + y * 0.105787412e-6)));
+  let ans = sqrt(0.636619772 / ax) * (cos(xx) * a1 - z * sin(xx) * a2);
+  if (x < 0.0) { return -ans; }
+  return ans;
+}
+// disc (dim 2): 2 J1(x)/x; sphere (dim 3): 3 (sin x - x cos x)/x^3 (series below x = 0.3: the closed form cancels in f32)
+fn th_window(x: f32, dim: u32) -> f32 {
+  if (x < 1e-6) { return 1.0; }
+  if (dim == 2u) { return 2.0 * bessj1(x) / x; }
+  if (x < 0.3) { let x2 = x * x; return 1.0 - x2 / 10.0 + x2 * x2 / 280.0; }
+  return 3.0 * (sin(x) - x * cos(x)) / (x * x * x);
+}
+@compute @workgroup_size(256)
+fn tophat(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
+  let i = linear_id(gid, nwg, 256u);
+  if (i >= thu.count) { return; }
+  let n = thu.n;
+  let mx = f32(fftfreq(i / (n * n), n)); let my = f32(fftfreq((i / n) % n, n)); let mz = f32(fftfreq(i % n, n));
+  let k = 6.283185307179586 * sqrt(mx * mx + my * my + mz * mz);
+  thf[i] = thf[i] * th_window(k * thu.r, thu.dim);
+}
+
 // ---------------------------------------------------------------- spectra
 struct BinU { n: u32, deconv: u32, p0: u32, p1: u32, norm: f32 };
 @group(0) @binding(0) var<uniform> bu: BinU;
@@ -326,6 +367,7 @@ function getPipelines(device) {
         bin: mk('bin', [U(0), R(1), R(2), R(3), R(4), W(5)]),
         maxabs: mk('maxabs', [U(0), R(1), W(2)]),
         maps: mk('maps', [U(0), R(1), R(2), W(3)]),
+        tophat: mk('tophat', [U(0), W(1)]),
         stPhi: makePipeline(device, ms, 'st_phi', stage1Layout(1), 'st_phi'),
       };
     })();
@@ -656,6 +698,26 @@ export class GpuCosmo3D {
       out.maps = { amp: mm.slice(0, n * n), phase: mm.slice(n * n) };
     }
     return out;
+  }
+
+  /**
+   * Top-hat (sphere; dim = 2: disc) smoothing of `field - offset`: forward FFT, multiply the spectrum by the Fourier window
+   * W(kR) (sphere 3 [sin x - x cos x]/x^3, disc 2 J1(x)/x, W(0) = 1, x = |k| R, k = 2 pi m with the fftfreq integers m, L = 1,
+   * R = radiusCells / n), inverse FFT, read back.  Returns the smoothed (field - offset) as a Float32Array(n^3), e.g. the smoothed
+   * overdensity of a density buffer with offset 1.  Uses the shared FFT scratch ('cplx-a', 'fhat'): call it from the serialised GPU queue.
+   */
+  async smoothTophat(field, radiusCells, offset = 0, dim = 3) {
+    const n = this.n, N = this.size, d = this.device;
+    const cA = this.buf('cplx-a', 2 * this.fbytes), fh = this.buf('fhat', 2 * this.fbytes), out = this.buf('th-out', this.fbytes);
+    const enc = d.createCommandEncoder({ label: 'tophat smoothing' });
+    this.fft.packReal(field, cA, enc, offset);
+    this.fft.forward(cA, fh, enc);
+    this._dispatch(enc, 'tophat', this.P.tophat, this.bg('tophat', this.P.tophat, [this.ring.resource(32), fh]),
+      [['u', N], ['u', n], ['u', dim], ['u', 0], radiusCells / n], N, 'tophat window');
+    this.fft.inverse(fh, cA, enc);
+    this.fft.unpackReal(cA, out, enc);
+    const [ab] = await readRegions(d, [{ buffer: out, bytes: this.fbytes }], enc);
+    return new Float32Array(ab);
   }
 
   /** Binned P(k) of `field - offset`, same convention as CosmoSim.power_spectrum. */

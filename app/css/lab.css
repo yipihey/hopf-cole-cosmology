@@ -138,3 +138,14 @@ html { color-scheme: light dark; }
 .lab-banner .lab-banner-detail { flex: 1 1 100%; font-size: 0.75rem; color: var(--hcc-muted); }
 .lab-banner a, .lab-banner button { cursor: pointer; font: inherit; }
 .lab-banner button.lab-banner-x { margin-left: auto; border: 0; background: transparent; color: inherit; font-size: 1.1rem; line-height: 1; }
+
+/* PDFs */
+.lab-pdf-grid { grid-template-columns: repeat(auto-fit, minmax(max(22rem, 49%), 1fr)); }
+.lab-pdf-tablewrap { overflow-x: auto; margin-top: 0.4rem; }
+.lab-pdf-table { border-collapse: collapse; width: 100%; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.lab-pdf-table th, .lab-pdf-table td { padding: 0.12rem 0.4rem; text-align: right; border-bottom: 1px solid var(--hcc-border); white-space: nowrap; }
+.lab-pdf-table th { font-weight: 600; color: var(--hcc-muted); cursor: help; }
+.lab-pdf-table th:first-child, .lab-pdf-table td:first-child { text-align: left; }
+.lab-pdf-name { display: flex; align-items: center; gap: 0.35rem; }
+.lab-pdf-swatch { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 2px; flex: 0 0 auto; }
+.lab-pdf-general { margin: 0.5rem 0 0; max-width: 62rem; line-height: 1.4; }

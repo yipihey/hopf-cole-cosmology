@@ -29,6 +29,12 @@ const NOTES = [
       Through 2LPT the displacement is exactly a gradient; at 3LPT and 4LPT a small transverse part Ψ_T appears (rms ratio ∼10⁻³), which can be corrected to first order in the inverse map, q(x) ≈ q_L(x) − Ψ_T(q_L(x)). Switch on <i>Legendre lab</i> and choose the “HC source ϕ” under Dynamics to compare the Legendre density with the sheet and with the Zel’dovich Hopf–Cole density: the residual against the sheet before shell crossing is the sheet’s own rasterization noise, which shrinks with N.`,
   },
   {
+    title: 'One-point PDFs of the density',
+    html: `The <i>PDFs</i> section histograms log₁₀(1+δ) cell by cell for every method, once on the raw grid and once after smoothing with a top-hat sphere (a disc in 2D) of adjustable diameter, so the one-point statistics of the sheet, CIC, the Hopf–Cole variants and linear theory can be compared directly.
+      Linear theory gives a Gaussian δ and therefore negative densities as soon as the rms contrast approaches one; gravity instead empties the voids towards a minimum density and builds a long high-density tail that is roughly lognormal (Coles &amp; Jones 1991).
+      After shell crossing the sheet sums the streams while the adhesion (Hopf–Cole) solution glues them into walls, so the tails differ, and smoothing Gaussianises both. The top-hat window is not positive in Fourier space, so the smoothed field can undershoot the true minimum density slightly.`,
+  },
+  {
     title: 'The Fourier method and its dynamic range',
     html: `The multiplier solution evaluates exp(−Φ/2ν) on the grid and then multiplies its transform by exp(−νk²D). For small ν the exponent range (Φmax − Φmin)/2ν is enormous (the readout “exponent range”), and double precision cannot hold e^{range}.
       The Fourier method therefore limits the range to max_exp by raising the effective viscosity ν_eff, which is why its result departs from the requested ν. The log-domain kernel (×1, ×2, ×4 refinement) evaluates the same heat-kernel convolution with log-sum-exp and remains accurate down to a grid floor of order Δx²/(4D), refined by the upsampling factor.`,

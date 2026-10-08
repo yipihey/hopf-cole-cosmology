@@ -596,6 +596,30 @@ export class Engine {
       return o;
     });
   }
+  /**
+   * Top-hat smoothed overdensity (sphere in 3D, disc in 2D) of diameter `diam` cells, via the Fourier-space window (WASM
+   * CosmoSim.tophat_smooth).  The 3D GPU path seeds this entry with the GPU FFT (needSmooth) beforehand.
+   */
+  smooth(which, P, diam) {
+    return this.memo(['smooth', ...this.fieldKey(which, P), diam], () => this.time('top-hat smoothing', () => this.sim.tophat_smooth(this.delta(which, P), diam / 2)));
+  }
+  /** GPU path: smooth the (cached) overdensity of `which` on the GPU and seed the memo entry read by smooth(). No-op elsewhere. */
+  async needSmooth(which, P, diam) {
+    if (!this.gpuActive(P) || !this.g) return;
+    await this.gpuSerial(() => this._gpuSmooth(which, P, diam));
+  }
+  async _gpuSmooth(which, P, diam) {
+    if (!this.gpuActive(P) || !this.g) return;
+    const key = ['smooth', ...this.fieldKey(which, P), diam];
+    if (this.peek(key) !== undefined) return;
+    const gen = this.gen, g = this.g;
+    try {
+      const d = this.delta(which, P);
+      const out = await this.timeAsync('top-hat (GPU)', () => g.smoothTophat(g.uploadField(d), diam / 2));
+      if (gen !== this.gen) return;
+      this.seed(key, out);
+    } catch (err) { if (gen === this.gen) this.gpuFailure(err); }
+  }
   /** Fourier maps: amp = log10|f^|/max, phase; both fft-shifted, as [ikx*n+iky]. */
   fmaps(which, P) {
     return this.memo(['fmap', ...this.fieldKey(which, P)], () => this.time('Fourier maps', () => {
