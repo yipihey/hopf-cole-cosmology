@@ -71,6 +71,28 @@ kernels $P_{13}^{\rm ZA} = -k^2\sigma_v^2 P_0(k)$ with the velocity dispersion
 $\sigma_v^2 = \frac1d\int\frac{d^dq}{(2\pi)^d}\frac{P_0(q)}{q^2}$: the famous
 over-damping of the Zel'dovich power spectrum.
 
+### Measuring the spectrum without a grid
+
+Depositing the sheet onto an Eulerian grid and transforming is convenient
+but introduces a window, aliasing and, for point-sampled deposits, a white
+noise floor. Two deposit-free routes are available in the laboratory. The
+Fourier transform of a plane wave over a simplex has a closed form, the
+Hermite–Genocchi identity
+$\int_T e^{-i\mathbf k\cdot\mathbf x}\,d^d x = d!\,|T|\;\exp[s_0,\dots,s_d]$
+with $s_j = -i\mathbf k\cdot\mathbf v_j$ the vertex phases and
+$\exp[\cdots]$ the divided difference of the exponential (one extra repeated
+node for a linear density profile), so $\hat\delta(\mathbf k)$ of the
+piecewise-linear sheet can be summed exactly over all simplices on any
+lattice mode: the "direct spectrum", which measures the sheet's own $k^{-3}$
+facet tail without any grid artefact. Alternatively, write the density in
+Lagrangian form, $\hat\delta(\mathbf k) = \int d^dq\, e^{-i\mathbf k\cdot\mathbf x(\mathbf q)}$;
+for the smooth, spectrally refined map the integrand is a smooth periodic
+function of $\mathbf q$ and the trapezoidal sum over the refined grid
+converges exponentially. Evaluated as a type-1 non-uniform FFT, this
+"NUFFT density" counts all streams, has no facets, and converges with the
+refinement factor, which makes it the reference for the true spectrum of
+the map.
+
 ## Sensitivity to the cutoff and the EFT counterterm
 
 Both loop integrals extend to $q \to \infty$. With the smoothing filter they
