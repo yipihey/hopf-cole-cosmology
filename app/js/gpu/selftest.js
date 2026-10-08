@@ -4,7 +4,7 @@
 import { loadCore } from '../hcc.js';
 import { getGPU } from '../viz/gpu.js';
 import { GpuFFT3D } from './fft3d.js';
-import { GpuCosmo3D } from './cosmo3d.js';
+import { GpuCosmo3D, dualDensityCpu } from './cosmo3d.js';
 import { STORAGE_RW } from './util.js';
 import { getTerms, getUnmergedSpec, growthUnmerged } from './terms.js';
 import { GpuLpt3D } from './lpt3d.js';
@@ -52,6 +52,36 @@ function specRelErr(g, w) {
   return m;
 }
 function unpack(flat) { const nb = flat.length / 3; return { k: flat.slice(0, nb), p: flat.slice(nb, 2 * nb), n: flat.slice(2 * nb) }; }
+
+/** q - x (box units, interleaved) from the WASM inverse map q (unwrapped), the input of GpuCosmo3D.dualDensity. */
+function qToDq(q, n) {
+  const N = n ** 3, o = new Float32Array(3 * N);
+  for (let i = 0; i < N; i++) {
+    const x = [Math.floor(i / (n * n)) / n, (Math.floor(i / n) % n) / n, (i % n) / n];
+    for (let a = 0; a < 3; a++) o[3 * i + a] = q[3 * i + a] - x[a];
+  }
+  return o;
+}
+const mean = (a) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return s / a.length; };
+const rmsM1 = (a) => { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - 1; s += d * d; } return Math.sqrt(s / a.length); };
+
+/** Dual-sheet checks against hc_dual_density() of the last WASM hopf_cole / hopf_cole_lpt call: `dqGpu` = GPU-built dq buffer. */
+async function checkDual(g, device, sim, n, tag, label, dualGpuBuf, tol) {
+  const N = n ** 3;
+  // reference: the f64 CPU implementation applied to the WASM inverse map (sim.hc_dual_density() sums the six Kuhn tetrahedra with
+  // their alternating orientation and is not usable in 3-D); `wasm` in the labels below refers to this reference
+  const dW = dualDensityCpu(sim.hc_qmap(), n);
+  const rhoG = await g.readField(dualGpuBuf);
+  record(tag, `dual sheet ${label}: GPU chain vs WASM, rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(rhoG, dW) / rmsM1(dW), tol);
+  record(tag, `dual sheet ${label}: |mean(rho_gpu) - 1|  (WASM ${mean(dW).toFixed(7)})`, Math.abs(mean(rhoG) - 1), 1e-5);
+  // algorithm check: the WASM inverse map as input to the GPU shader
+  const dqW = qToDq(sim.hc_qmap(), n);
+  const bq = device.createBuffer({ size: 12 * N, usage: STORAGE_RW });
+  device.queue.writeBuffer(bq, 0, dqW);
+  const rhoA = await g.readField(g.dualDensity(bq));
+  record(tag, `dual sheet ${label}, WASM q as input: rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(rhoA, dW) / rmsM1(dW), 1e-4);
+  bq.destroy();
+}
 
 async function makeSim(core, n, om = 1, order = 2) {
   const t0 = performance.now();
@@ -103,6 +133,17 @@ export async function validate(core, gpu, n, { om = 1, order = 2 } = {}) {
   const hc2 = g.hopfCole(1e-3, 1.0);
   const dG2 = await g.readField(hc2.delta);
   record(tag, `Hopf-Cole d (nu=1e-3, D=1, w=${hc2.w}): rms diff / rms(d)`, rmsDiff(dG2, dW2) / rms(dW2), 1e-3);
+
+  // dual sheet (Zel'dovich source): q = x - D grad Phi_v on the GPU
+  for (const [Dd, nud] of [[D, nu], [1.0, 1e-3]]) {
+    const enc = device.createCommandEncoder();
+    g.hopfCole(nud, Dd, enc);
+    const dq = g.hcDisplacement(Dd, enc);
+    g.dualDensity(dq, enc);
+    device.queue.submit([enc.finish()]);
+    sim.hopf_cole(Dd, nud, 1, 30);
+    await checkDual(g, device, sim, n, tag, `Zel'dovich (D=${Dd}, nu=${nud})`, g.buf('dual-rho'), 1e-4);
+  }
 
   // spectra of the CIC delta (deconvolved and plain) and of the Hopf-Cole delta
   const deltaCic = Float32Array.from(rhoW, (v) => v - 1);
@@ -309,6 +350,15 @@ export async function validateLpt(core, gpu, n, { om = 1, order = 4 } = {}) {
       const frac = sim.hopf_cole_lpt(D, order, nu, 1, 30, tr);
       const dW = sim.hc_delta();
       record(tag, `Legendre ${order}LPT${tr ? '+transverse' : ''} (${cs.name}=${D.toFixed(4)}, nu=${nu}, w=${hc.w}): rms diff / rms(d)`, relRms(dG, dW), 1e-3);
+      {
+        const enc2 = device.createCommandEncoder();
+        g.hopfCole(nu, D, enc2, 'phi-eff');
+        const dq = tr ? lpt.transverse(D, enc2) : g.hcDisplacement(D, enc2);
+        g.dualDensity(dq, enc2);
+        device.queue.submit([enc2.finish()]);
+        sim.hopf_cole_lpt(D, order, nu, 1, 30, tr);
+        await checkDual(g, device, sim, n, tag, `Legendre ${order}LPT${tr ? '+transverse' : ''} (${cs.name})`, g.buf('dual-rho'), cs.D < dscO ? 1e-4 : 1e-3);
+      }
       if (!tr) dNoT = dG;
       else if (dNoT) log(`  size of the transverse correction at ${cs.name}: rms(d_T - d_noT)/rms(d) = ${relRms(dG, dNoT).toExponential(2)}`);
       if (tr) record(tag, `  rms|Psi_T|/rms|Psi_L| GPU ${L.frac.toExponential(3)} vs WASM ${frac.toExponential(3)}: rel. difference`, Math.abs(L.frac - frac) / Math.max(frac, 1e-30), 1e-3);

@@ -104,11 +104,18 @@ export class Engine {
   //  'lptT' : same with the first-order correction for the transverse part (orders >= 3)
   /** Source selector for a field name: 'hc' follows P.hs, 'hcz' is always Zel'dovich, 'hcl' is the Legendre variant. */
   hcSrcOf(which, P) {
+    which = Engine.hcOf(which);
     if (which === 'hcz') return 'zel';
     if (which === 'hcl') return P.hs === 'lptT' ? 'lptT' : 'lpt';
     return P.hs || 'zel';
   }
   static isHc(which) { return which === 'hc' || which === 'hcz' || which === 'hcl'; }
+  /** The 'dual sheet' variants of the Hopf-Cole fields: the same inverse map q(x), mass-conserving density from the preimage volumes. */
+  static isDual(which) { return which === 'hcdual' || which === 'hczdual' || which === 'hcldual'; }
+  /** Any field derived from the Hopf-Cole solution (plain or dual). */
+  static isHcAny(which) { return Engine.isHc(which) || Engine.isDual(which); }
+  /** 'hcdual' -> 'hc', 'hczdual' -> 'hcz', 'hcldual' -> 'hcl' (identity for the others). */
+  static hcOf(which) { return which.endsWith('dual') ? which.slice(0, -4) : which; }
   /** Cache tag of a source: 'zel' | 'lpt<order>' | 'lptT<order>' (the T variant equals 'lpt' up to 2LPT, where Psi is a gradient). */
   hcTag(P, src = P.hs || 'zel') {
     if (src === 'zel') return 'zel';
@@ -416,6 +423,27 @@ export class Engine {
         if (gen !== this.gen || !delta) return;
         this.seed(key, { delta, nuEff: P.nu, range, floor: 1 / (this.n * this.n * 4 * Math.max(P.D, 1e-12)), ratio: NaN });
         this.gFresh.hc = key.join('|');              // the single hc scratch buffer now holds this field
+      } else if (Engine.isDual(which) && P.me === 1) {
+        // dual sheet: the Hopf-Cole inverse map q = x + dq (dq = -D grad Phi_v, with the transverse correction for 'lptT') -> cell preimage volumes
+        const src = this.hcSrcOf(which, P), tag = this.hcTag(P, src);
+        const hkey = this.hcKey(P, src), key = ['dualrho', ...hkey];
+        if (this.peek(key) !== undefined) return;
+        const trans = tag.startsWith('lptT');
+        const rho = await this.timeAsync('dual sheet (GPU)', async () => {
+          const psrc = tag === 'zel' ? 'phi0' : 'phi-eff';
+          if (tag !== 'zel') await this.gpuLegendre(P, order, gen);
+          if (gen !== this.gen) return null;
+          const enc = this.gpuDev.createCommandEncoder({ label: 'dual sheet' });
+          g.hopfCole(P.nu, P.D, enc, psrc);
+          const dq = trans ? this.lpt.transverse(P.D, enc) : g.hcDisplacement(P.D, enc);
+          g.dualDensity(dq, enc);
+          this.gpuDev.queue.submit([enc.finish()]);
+          return g.readField(g.buf('dual-rho'));
+        });
+        if (gen !== this.gen || !rho) return;
+        this.seed(key, rho);
+        this.gFresh.dual = ['hcd', ...hkey].join('|');   // 'dual-rho' holds this field
+        this.gFresh.hc = hkey.join('|');                 // and 'hc-delta' the plain Hopf-Cole delta of the same source (the pass above recomputed it)
       }
     } catch (err) { if (gen === this.gen) this.gpuFailure(err); }
   }
@@ -471,6 +499,7 @@ export class Engine {
       if (which === 'cic' && this.gFresh.cic === fkey) { buf = g.buf('rho'); offset = 1; }
       else if (which === 'sheet' && this.gFresh.sheet === fkey) { buf = g.buf('sheet-rho'); offset = 1; }
       else if (hcLike && this.gFresh.hc === fkey) buf = g.buf('hc-delta');
+      else if (Engine.isDual(which) && this.gFresh.dual === fkey) { buf = g.buf('dual-rho'); offset = 1; }
       else buf = g.uploadField(this.delta(which, P));
       const an = await this.timeAsync('FFT + spectra (GPU)', async () => g.analyze(buf, { nbins: this.nbins, maps: true, cross: true, offset }));
       if (gen !== this.gen) return;
@@ -532,17 +561,28 @@ export class Engine {
   /** Hopf-Cole solution for the source potential `src` (default: the selected one, P.hs). */
   hc(P, src = P.hs || 'zel') {
     const tag = this.hcTag(P, src);
-    return this.memo(this.hcKey(P, src), () => this.time(tag === 'zel' ? 'Hopf-Cole' : 'Hopf-Cole (Legendre)', () => {
-      const s = this.sim;
-      let ratio = 0;
-      if (tag === 'zel') s.hopf_cole(P.D, P.nu, P.me, P.mx);
-      else { this.ensureWasm(P.order); ratio = s.hopf_cole_lpt(P.D, P.order, P.nu, P.me, P.mx, tag.startsWith('lptT')); }
-      const r = { delta: s.hc_delta(), nuEff: s.hc_nu_eff(), range: s.hc_exponent_range(), floor: s.hc_nu_floor(), ratio };
-      if (this.dim === 2) {
-        r.phi = s.hc_phi(); r.lnpsi = s.hc_lnpsi(); r.psihat = s.hc_psihat_log(); r.vel = s.hc_velocity();
-      }
-      return r;
-    }));
+    return this.memo(this.hcKey(P, src), () => this.time(tag === 'zel' ? 'Hopf-Cole' : 'Hopf-Cole (Legendre)', () => this.hcWasm(P, src, tag)));
+  }
+  /** WASM Hopf-Cole run; also evaluates the dual-sheet density of its inverse map (the WASM sim only keeps the last run's map). */
+  hcWasm(P, src, tag = this.hcTag(P, src)) {
+    const s = this.sim;
+    let ratio = 0;
+    if (tag === 'zel') s.hopf_cole(P.D, P.nu, P.me, P.mx);
+    else { this.ensureWasm(P.order); ratio = s.hopf_cole_lpt(P.D, P.order, P.nu, P.me, P.mx, tag.startsWith('lptT')); }
+    const r = { delta: s.hc_delta(), nuEff: s.hc_nu_eff(), range: s.hc_exponent_range(), floor: s.hc_nu_floor(), ratio };
+    if (this.dim === 2) {
+      r.phi = s.hc_phi(); r.lnpsi = s.hc_lnpsi(); r.psihat = s.hc_psihat_log(); r.vel = s.hc_velocity();
+    }
+    // preimage volumes of the Eulerian cells under the inverse map (shoelace areas in 2D, signed Kuhn tetrahedra in 3D)
+    r.dual = this.time('dual sheet (WASM)', () => s.hc_dual_density());
+    return r;
+  }
+  /** Dual-sheet density rho/rhobar of the Hopf-Cole inverse map for the source `src` (mass-conserving; GPU path: seeded by _gpuField). */
+  dualRho(P, src = P.hs || 'zel') {
+    return this.memo(['dualrho', ...this.hcKey(P, src)], () => {
+      const r = this.hc(P, src);
+      return r.dual || this.hcWasm(P, src).dual;       // a GPU-seeded Hopf-Cole entry carries no dual field
+    });
   }
   /** rms|Psi_T| / rms|Psi_L| of the order-P.order displacement at D (0 up to 2LPT); D-dependent, ν-independent. */
   psiT(P) {
@@ -573,6 +613,7 @@ export class Engine {
     switch (which) {
       case 'sheet': case 'cic': return [which, P.D, P.order];
       case 'hc': case 'hcz': case 'hcl': return this.hcKey(P, this.hcSrcOf(which, P));
+      case 'hcdual': case 'hczdual': case 'hcldual': return ['hcd', ...this.hcKey(P, this.hcSrcOf(which, P))];
       default: return ['lin', P.D];
     }
   }
@@ -580,6 +621,7 @@ export class Engine {
   delta(which, P) {
     return this.memo(['delta', ...this.fieldKey(which, P)], () => {
       if (Engine.isHc(which)) return this.hc(P, this.hcSrcOf(which, P)).delta;
+      if (Engine.isDual(which)) { const r = this.dualRho(P, this.hcSrcOf(which, P)), o = new Float32Array(r.length); for (let i = 0; i < o.length; i++) o[i] = r[i] - 1; return o; }
       if (which === 'lin') return this.linear(P);
       const rho = which === 'sheet' ? this.sheet(P) : this.cic(P);
       const o = new Float32Array(rho.length);

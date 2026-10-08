@@ -574,6 +574,7 @@ export class GpuLpt3D {
     const w = [['u', N], ['u', n], 0, 0, 0, 0, 0, 0, D, 0, 0, 0];
     this._passB(enc, this.P.tcDisp, [[2, phi], [3, psiT], [4, dq]], w, N, 'tc disp');
     this._passB(enc, this.P.tcDelta, [[2, dq], [3, delta]], w, N, 'tc delta');
+    return dq;                      // q - x of the corrected inverse map (box units), for GpuCosmo3D.dualDensity
   }
 
   // ------------------------------------------------------------------ shell crossing

@@ -487,3 +487,28 @@ fn dual_sheet_density() {
     assert!((mean - 1.0).abs() < 1e-5);
     assert!((e / nn).sqrt() < 0.15);
 }
+
+#[test]
+fn dual_sheet_density_3d() {
+    use hcc_core::hopfcole::{dual_sheet_density, HcMethod};
+    // undeformed map: exactly 1 everywhere
+    let c = Cosmo::new(3, 8, 1.0);
+    let mut q = vec![0.0f32; c.grid.size * 3];
+    for idx in 0..c.grid.size { let ijk = c.grid.unravel(idx); for a in 0..3 { q[idx * 3 + a] = ijk[a] as f32 * c.grid.dx() as f32; } }
+    let rho = dual_sheet_density(&c.grid, &q);
+    for &v in &rho { assert!((v - 1.0).abs() < 1e-6, "undeformed cube volume {}", v); }
+    // Gaussian field: mean exactly 1 and agreement with the tetrahedral sheet
+    let mut c = Cosmo::new(3, 32, 1.0);
+    c.set_ic_gaussian(PkShape::PowerLaw { n: -1.0 }, 0.08, 5, 1.0);
+    c.build_lpt(2);
+    let d = 0.7 * c.shell_crossing(2);
+    let (hc, _) = c.hopf_cole_lpt(d, 2, 1e-4, HcMethod::RealSpace { refine: 1 }, false);
+    let dual = dual_sheet_density(&c.grid, &hc.qmap);
+    let sheet = c.sheet_density(d, 2, 32, 2);
+    let mean: f64 = dual.iter().map(|&v| v as f64).sum::<f64>() / dual.len() as f64;
+    let mut e = 0.0; let mut nn = 0.0; let mut e2 = 0.0;
+    for i in 0..dual.len() { e += (dual[i] as f64 - sheet[i] as f64).powi(2); nn += (sheet[i] as f64 - 1.0).powi(2); e2 += (hc.delta[i] as f64 + 1.0 - sheet[i] as f64).powi(2); }
+    println!("3D dual: mean {mean:.7}, rel rms (dual - sheet) {:.3e}, (FD - sheet) {:.3e}", (e / nn).sqrt(), (e2 / nn).sqrt());
+    assert!((mean - 1.0).abs() < 1e-5, "mean {}", mean);
+    assert!((e / nn).sqrt() < 0.3);
+}

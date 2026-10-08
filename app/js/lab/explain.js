@@ -29,6 +29,11 @@ const NOTES = [
       Through 2LPT the displacement is exactly a gradient; at 3LPT and 4LPT a small transverse part Ψ_T appears (rms ratio ∼10⁻³), which can be corrected to first order in the inverse map, q(x) ≈ q_L(x) − Ψ_T(q_L(x)). Switch on <i>Legendre lab</i> and choose the “HC source ϕ” under Dynamics to compare the Legendre density with the sheet and with the Zel’dovich Hopf–Cole density: the residual against the sheet before shell crossing is the sheet’s own rasterization noise, which shrinks with N.`,
   },
   {
+    title: 'The dual sheet: a mass-conserving density from the inverse map',
+    html: `The Hopf–Cole solution gives the inverse Lagrangian map at every Eulerian grid point, q(x) = x − D∇Φ_v (plus the transverse correction for the nLPT source). Instead of differentiating it (1+δ = det ∂q/∂x with finite differences, which under-resolves peaks), the <i>dual sheet</i> takes the mass of an Eulerian cell to be the Lagrangian volume of its preimage: the polygon (2D, shoelace area) or hexahedron (3D, six Kuhn tetrahedra) spanned by q at the cell’s corners, so ρ/ρ̄ = |volume|/Δx^d.
+      The preimages tile Lagrangian space, so mass is conserved exactly (the mean is 1 to rounding) and no derivative is taken. Before shell crossing it keeps the accuracy of the Legendre inversion in voids and, like the forward sheet, resolves the peaks; afterwards the cell polygons fold and the density follows the single-stream (adhesion) map. Compare it with the sheet and with both Hopf–Cole densities in the <i>Legendre lab</i>, where for small ν (near the grid floor Δx²/4D) the residual dual − sheet is several times smaller than the other two; at larger ν the viscous smoothing of q dominates all three.`,
+  },
+  {
     title: 'One-point PDFs of the density',
     html: `The <i>PDFs</i> section histograms log₁₀(1+δ) cell by cell for every method, once on the raw grid and once after smoothing with a top-hat sphere (a disc in 2D) of adjustable diameter, so the one-point statistics of the sheet, CIC, the Hopf–Cole variants and linear theory can be compared directly.
       Linear theory gives a Gaussian δ and therefore negative densities as soon as the rms contrast approaches one; gravity instead empties the voids towards a minimum density and builds a long high-density tail that is roughly lognormal (Coles &amp; Jones 1991).

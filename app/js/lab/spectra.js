@@ -5,11 +5,14 @@ import { slider, checkbox, readout } from '../viz/ui.js';
 import { fitCounterterm } from '../hcc.js';
 import { el, fmtNum } from './dom.js';
 
+export const DUAL_COLOR = '#6a3d9a';
+
 const SERIES = [
   ['lin', 'linear theory'],
   ['sheet', 'sheet (measured)'],
   ['cic', 'CIC (deconv.)'],
   ['hc', 'Hopf–Cole (selected source)'],
+  ['hcdual', 'Hopf–Cole dual sheet'],
   ['spt', '1-loop SPT'],
   ['za', '1-loop Zel’dovich'],
   ['eft', 'EFT fit'],
@@ -41,7 +44,7 @@ export class Spectra {
     this.csOut = readout(cbs, { label: 'c_s²' });
     this.pkHost = el('div', 'lab-plot', pp);
     this.pkPlot = new LinePlot(this.pkHost, { width: 500, height: 380 });
-    el('p', 'hcc-note lab-cap', pp, 'Dashed vertical lines mark k_Nyq and the smoothing scale 1/R. Linear theory is the smooth curve D²P0(k); the 1-loop curves are only available for Gaussian ICs. The EFT curve subtracts 2c_s²k²P_lin from the SPT 1-loop with c_s² fitted to the measured spectrum for k < k_max.');
+    el('p', 'hcc-note lab-cap', pp, 'Dashed vertical lines mark k_Nyq and the smoothing scale 1/R. The Hopf–Cole dual sheet is the mass-conserving density of the same inverse map (cell mass = Lagrangian volume of the cell’s preimage). Linear theory is the smooth curve D²P0(k); the 1-loop curves are only available for Gaussian ICs. The EFT curve subtracts 2c_s²k²P_lin from the SPT 1-loop with c_s² fitted to the measured spectrum for k < k_max.');
 
     // ---- r(k) panel
     const rp = this.rPanel = el('div', 'hcc-panel lab-panel', grid);
@@ -90,7 +93,11 @@ export class Spectra {
     if (w.has('sheet')) t.push({ label: dim === 3 ? 'P(k) sheet (tetrahedra)' : 'P(k) sheet', fn: async () => { await e.need('analysis', 'sheet', P); e.pk('sheet', P, false); } });
     if (w.has('cic')) t.push({ label: 'P(k) CIC', fn: async () => { await e.need('analysis', 'cic', P); e.pk('cic', P, true); } });
     if (w.has('hc')) t.push({ label: 'P(k) Hopf–Cole', fn: async () => { await e.need('analysis', 'hc', P); e.pk('hc', P); } });
-    t.push({ label: 'r(k)', fn: async () => { await e.need('analysis', prim, P); await e.need('analysis', 'hc', P); e.rk(prim, P); e.rk('hc', P); e.sigmaV2(); } });
+    if (w.has('hcdual')) t.push({ label: 'P(k) Hopf–Cole dual sheet', fn: async () => { await e.need('analysis', 'hcdual', P); e.pk('hcdual', P); } });
+    t.push({ label: 'r(k)', fn: async () => {
+      await e.need('analysis', prim, P); await e.need('analysis', 'hc', P); e.rk(prim, P); e.rk('hc', P); e.sigmaV2();
+      if (w.has('hcdual')) { await e.need('analysis', 'hcdual', P); e.rk('hcdual', P); }
+    } });
     const loops = gaussian && (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13') || w.has('za'));
     // lite: show the measured spectra first, the 1-loop curves (0.3 s in WASM) follow in a second drawing; only when this section is visible
     if (this.app.lite && loops && this.app.visible('s') && !e.peek(['loop1', 0])) t.push({ label: 'plots (1-loop follows)', fn: () => this.draw(P, true) });
@@ -126,6 +133,8 @@ export class Spectra {
         : { x: s.k, y: s.p, label: primLabel, color: PALETTE[0], points: true, width: 3, opacity: 0.6, radius: 3 });
     }
     if (w.has('hc')) { const s = e.pk('hc', P); series.push({ x: s.k, y: s.p, label: 'Hopf–Cole' + hcTag, color: PALETTE[1], points: true, width: 1.2, radius: 2 }); }
+
+    if (w.has('hcdual')) { const s = e.pk('hcdual', P); series.push({ x: s.k, y: s.p, label: 'Hopf–Cole dual sheet' + hcTag, color: DUAL_COLOR, points: true, width: 1.2, radius: 2 }); }
 
     let cs2 = null, fitNote = '';
     const spt = e.gaussian && !noLoop ? (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13') ? e.loop(P, 0) : null) : null;
@@ -169,6 +178,7 @@ export class Spectra {
     const rp = e.rk(prim, P), rh = e.rk('hc', P);
     rs.push({ x: rp.k, y: rp.r, label: `${dim === 2 ? 'sheet' : 'CIC'} × linear`, color: PALETTE[0], points: true, width: 2.4, opacity: 0.7, radius: 2.5 });
     rs.push({ x: rh.k, y: rh.r, label: 'Hopf–Cole' + hcTag + ' × linear', color: PALETTE[1], points: true, width: 1.2, radius: 2 });
+    if (w.has('hcdual')) { const rd = e.rk('hcdual', P); rs.push({ x: rd.k, y: rd.r, label: 'Hopf–Cole dual sheet' + hcTag + ' × linear', color: DUAL_COLOR, points: true, width: 1.2, radius: 2 }); }
     const sv2 = e.sigmaV2();
     if (sv2 !== null) {
       const ks = Float64Array.from({ length: 160 }, (_, i) => kminPlot * Math.pow(kmaxPlot / kminPlot, i / 159));

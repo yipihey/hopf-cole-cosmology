@@ -83,7 +83,7 @@ class Slot {
   /** True when the panel shows something derived from the Hopf-Cole solution (recomputed by the fast nu path). */
   dependsOnHc() {
     const { kind, sub } = this.cfg;
-    return ['hc', 'phi', 'lnpsi', 'psihat', 'speed'].includes(kind) || ((kind === 'fabs' || kind === 'fphase') && sub === 'hc');
+    return ['hc', 'hcdual', 'phi', 'lnpsi', 'psihat', 'speed'].includes(kind) || ((kind === 'fabs' || kind === 'fphase') && (sub === 'hc' || sub === 'hcdual'));
   }
 
   isFast() { return this.cfg.def.gpu && this.app.gpu; }

@@ -5,8 +5,8 @@ import { fmap, percentiles, mean, minmax } from '../hcc.js';
 
 export const LIN_MAX = 5;       // upper colour limit for non-log density maps
 
-const SUB_OF = [['sheet', 'sheet'], ['cic', 'CIC'], ['hc', 'Hopf–Cole'], ['lin', 'linear']];
-const OF_NAME = { sheet: 'sheet', cic: 'CIC', hc: 'Hopf–Cole', lin: 'linear' };
+const SUB_OF = [['sheet', 'sheet'], ['cic', 'CIC'], ['hc', 'Hopf–Cole'], ['hcdual', 'Hopf–Cole dual sheet'], ['lin', 'linear']];
+const OF_NAME = { sheet: 'sheet', cic: 'CIC', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' };
 
 /** Shift the raw FFT-ordered n×n map [ikx*n+iky] so that k = 0 sits at the centre. */
 export function fftshift2D(a, n) {
@@ -48,6 +48,11 @@ export const CATALOG = {
     caption: (sub, P) => (P && P.hs && P.hs !== 'zel' && P.order > 1
       ? `1+δ = det(I − ∇∇Φ) with Φ the Legendre transform (Hopf–Lax minimum, heat-kernel smoothed at finite ν) of the order-${P.order} ${P.hs === 'lptT' && P.order > 2 ? 'longitudinal + transverse-corrected ' : 'longitudinal '}Lagrangian map. Before shell crossing it is the nLPT density, particle-free on the Eulerian grid; afterwards it keeps one stream per point (adhesion) with shocks of width ~√(νD).`
       : '1+δ = det(I − D∇∇Φ_v) from the viscous-Burgers (adhesion) solution obtained with the Hopf–Cole transform. Before shell crossing it equals the Zel’dovich sheet; afterwards mass sticks into shocks of width ~√(νD).'),
+  },
+  hcdual: {
+    label: 'Hopf–Cole dual sheet (mass-conserving)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
+    data: (e, P) => e.dualRho(P),
+    caption: () => 'The mass of an Eulerian cell is the Lagrangian volume of its preimage under the Hopf–Cole inverse map q(x) = x − D∇Φ_v (the polygon spanned by q at the cell’s corners), so mass is conserved exactly and peaks are not under-resolved by finite-difference Hessians; before shell crossing it should beat both the finite-difference Hopf–Cole density (in peaks) and the forward sheet (in voids).',
   },
   lin: {
     label: 'Linear density D δ0', cls: 'sym', cmap: 'rdbu', unit: 'δ_lin',
@@ -105,7 +110,7 @@ export const CATALOG = {
   },
 };
 
-export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'cic', 'hc', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed'];
+export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed'];
 
 /** Percentile-based range helpers for special classes. */
 export function psihatRange(arr) {

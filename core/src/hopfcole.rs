@@ -393,20 +393,24 @@ pub fn dual_sheet_density(grid: &Grid, qmap: &[f32]) -> Vec<f32> {
             rho[idx] = (0.5 * a2.abs() / (dx * dx)) as f32;
         }
     } else if d == 3 {
-        // hexahedron volume as the sum of the 6 Kuhn tetrahedra (corner bits x,y,z)
+        // hexahedron volume as the signed sum of the 6 Kuhn tetrahedra (corner bits
+        // x,y,z); with the vertex order below the tetrahedra alternate in orientation
+        // in the reference cube, hence the signs SG (a folded preimage then gets the
+        // correct net volume rather than a sum of absolute values).
         const TETS: [[usize; 4]; 6] = [[0, 1, 3, 7], [0, 1, 5, 7], [0, 2, 3, 7], [0, 2, 6, 7], [0, 4, 5, 7], [0, 4, 6, 7]];
+        const SG: [f64; 6] = [1.0, -1.0, -1.0, 1.0, 1.0, -1.0];
         for idx in 0..size {
             let ijk = grid.unravel(idx);
             let mut c = [[0.0f64; 3]; 8];
             for b in 0..8 { c[b] = corner(ijk, [b & 1, (b >> 1) & 1, (b >> 2) & 1]); }
             let mut vol = 0.0;
-            for t in TETS.iter() {
+            for (ti, t) in TETS.iter().enumerate() {
                 let (p0, p1, p2, p3) = (c[t[0]], c[t[1]], c[t[2]], c[t[3]]);
                 let e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
                 let e2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
                 let e3 = [p3[0] - p0[0], p3[1] - p0[1], p3[2] - p0[2]];
                 let det = e1[0] * (e2[1] * e3[2] - e2[2] * e3[1]) - e1[1] * (e2[0] * e3[2] - e2[2] * e3[0]) + e1[2] * (e2[0] * e3[1] - e2[1] * e3[0]);
-                vol += det / 6.0;
+                vol += SG[ti] * det / 6.0;
             }
             rho[idx] = (vol.abs() / (dx * dx * dx)) as f32;
         }

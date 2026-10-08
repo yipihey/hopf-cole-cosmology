@@ -10,7 +10,7 @@ export const METHODS = [0, 1, 2, 4];
 export const OMEGA_M = [1, 0.3, 0.25, 0.4];     // 1 = Einstein-de Sitter (exact D^n growth)
 
 export const SLOT_KINDS = [
-  'sheetgpu', 'sheetcpu', 'cic', 'hc', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed',
+  'sheetgpu', 'sheetcpu', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed',
 ];
 
 export function defaultN(mode) { return mode === 3 ? 64 : (ENV.lite ? 128 : 256); }
@@ -89,13 +89,13 @@ const SCHEMA = [
   ['same', 'sr', 'bool'],
   ['rmin', 'r0', 'num', [1e-3, 1]],
   ['rmax', 'r1', 'num', [1, 1e4]],
-  ['v1', 'v1', 'str', ['cic', 'sheet', 'hc', 'lin']],
+  ['v1', 'v1', 'str', ['cic', 'sheet', 'hc', 'hcdual', 'lin']],
   ['vm', 'vm', 'str', ['mip', 'emission']],
   ['vo', 'vo', 'num', [0.1, 1000]],
-  ['s1', 's1', 'str', ['cic', 'sheet', 'hc', 'lin']],
+  ['s1', 's1', 'str', ['cic', 'sheet', 'hc', 'hcdual', 'lin']],
   ['sa', 'sa', 'int', [0, 2]],
   ['si', 'si', 'num', [0, 1]],
-  ['fo', 'fo', 'str', ['cic', 'sheet', 'hc', 'lin']],
+  ['fo', 'fo', 'str', ['cic', 'sheet', 'hc', 'hcdual', 'lin']],
   ['c1', 'c1', 'str'], ['c2', 'c2', 'str'], ['c3', 'c3', 'str'], ['c4', 'c4', 'str'],
   ['l1', 'l1', 'bool'], ['l2', 'l2', 'bool'],
   ['ser', 'se', 'list'],

@@ -18,6 +18,9 @@
 //   rho  = g.cicDensity(pos)                                  -> GPUBuffer n^3 f32, rho / rhobar
 //   {delta, phi} = g.hopfCole(nu, D [, enc, src])             -> GPUBuffers n^3 f32 (delta, Phi_v = -2 nu ln psi); src = 'phi0' (Zel'dovich)
 //                                                                or 'phi-eff' (nLPT effective potential, GpuLpt3D.legendre)
+//   dq   = g.hcDisplacement(D [, enc])                       -> GPUBuffer 3 n^3 f32, dq = q - x = -D grad Phi_v(x) (box units; Phi_v in 'hc-phi', 4th-order FD)
+//   rho  = g.dualDensity(dq [, enc])                          -> GPUBuffer n^3 f32, "dual sheet" rho/rhobar (mean 1): Lagrangian volume of the
+//                                                                preimage of every Eulerian cell under the inverse map q = x + dq (8 corners, 6 orientation-corrected Kuhn tetrahedra)
 //   st = await g.potentialStats(name)                         -> {gmax, range} of a potential buffer, measured on the GPU
 //   {k, p, n} = await g.powerSpectrum(field, nbins, deconvolveCic [, offset])      Float64Array each
 //   {amp, phase} = await g.fourierMaps(field [, offset])      Float32Array n^2, fft-shifted [ikx*n + iky]
@@ -195,6 +198,61 @@ fn hc_delta(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgrou
   hout[i] = det - 1.0;
 }
 
+// ---------------------------------------------------------------- dual sheet (mass-conserving density from the inverse map)
+struct DsU { count: u32, n: u32, p0: u32, p1: u32, D: f32 };
+@group(0) @binding(0) var<uniform> dsu: DsU;
+@group(0) @binding(1) var<storage, read> dsin: array<f32>;
+@group(0) @binding(2) var<storage, read_write> dsout: array<f32>;
+
+fn ds_phi(x: i32, y: i32, z: i32) -> f32 {
+  let n = dsu.n; let m = i32(n) - 1;
+  return dsin[(u32(x & m) * n + u32(y & m)) * n + u32(z & m)];
+}
+// dq = q - x = -D grad Phi_v  (4th-order central differences, periodic; box units)
+@compute @workgroup_size(256)
+fn hc_disp(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
+  let i = linear_id(gid, nwg, 256u);
+  if (i >= dsu.count) { return; }
+  let n = dsu.n;
+  let x = i32(i / (n * n)); let y = i32((i / n) % n); let z = i32(i % n);
+  let s = f32(n) / 12.0;
+  let gx = (8.0 * (ds_phi(x + 1, y, z) - ds_phi(x - 1, y, z)) - (ds_phi(x + 2, y, z) - ds_phi(x - 2, y, z))) * s;
+  let gy = (8.0 * (ds_phi(x, y + 1, z) - ds_phi(x, y - 1, z)) - (ds_phi(x, y + 2, z) - ds_phi(x, y - 2, z))) * s;
+  let gz = (8.0 * (ds_phi(x, y, z + 1) - ds_phi(x, y, z - 1)) - (ds_phi(x, y, z + 2) - ds_phi(x, y, z - 2))) * s;
+  let D = dsu.D;
+  dsout[3u * i] = -D * gx; dsout[3u * i + 1u] = -D * gy; dsout[3u * i + 2u] = -D * gz;
+}
+
+// rho/rhobar of cell (x,y,z) = |volume| of the hexahedron spanned by q at the 8 corners (cell units; the periodic dq is
+// used across the box edge, x of the wrapped corner continues past n so the hexahedron stays contiguous)
+@compute @workgroup_size(256)
+fn dual_density(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
+  let i = linear_id(gid, nwg, 256u);
+  if (i >= dsu.count) { return; }
+  let n = dsu.n; let mask = n - 1u;
+  let cx = i / (n * n); let cy = (i / n) % n; let cz = i % n;
+  let nf = f32(n);
+  let d0 = vec3<f32>(dsin[3u * i], dsin[3u * i + 1u], dsin[3u * i + 2u]);
+  var c = array<vec3<f32>, 8>();
+  for (var b = 0u; b < 8u; b = b + 1u) {
+    let bx = b & 1u; let by = (b >> 1u) & 1u; let bz = (b >> 2u) & 1u;
+    let j = 3u * ((((cx + bx) & mask) * n + ((cy + by) & mask)) * n + ((cz + bz) & mask));
+    c[b] = vec3<f32>(f32(bx), f32(by), f32(bz)) + (vec3<f32>(dsin[j], dsin[j + 1u], dsin[j + 2u]) - d0) * nf;
+  }
+  // 6 Kuhn tetrahedra (corner bits x,y,z), as in sheet.rs
+  var tets = array<vec4<u32>, 6>(vec4<u32>(0u, 1u, 3u, 7u), vec4<u32>(0u, 1u, 5u, 7u), vec4<u32>(0u, 2u, 3u, 7u),
+                                 vec4<u32>(0u, 2u, 6u, 7u), vec4<u32>(0u, 4u, 5u, 7u), vec4<u32>(0u, 4u, 6u, 7u));
+  // the six Kuhn tetrahedra alternate in orientation (determinants +1,-1,-1,+1,+1,-1 for the undeformed cube): sign-correct them
+  var sg = array<f32, 6>(1.0, -1.0, -1.0, 1.0, 1.0, -1.0);
+  var vol = 0.0;
+  for (var t = 0u; t < 6u; t = t + 1u) {
+    let q = tets[t];
+    let e1 = c[q.y] - c[q.x]; let e2 = c[q.z] - c[q.x]; let e3 = c[q.w] - c[q.x];
+    vol = vol + sg[t] * dot(e1, cross(e2, e3)) / 6.0;
+  }
+  dsout[i] = abs(vol);
+}
+
 // ---------------------------------------------------------------- top-hat smoothing (Fourier-space window, in place on the spectrum)
 struct THU { count: u32, n: u32, dim: u32, p1: u32, r: f32 };
 @group(0) @binding(0) var<uniform> thu: THU;
@@ -348,6 +406,35 @@ fn st_phi(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups
 }
 `;
 
+/**
+ * CPU reference of GpuCosmo3D.dualDensity for the 3-D inverse map q (interleaved, unwrapped, box units, the output of
+ * CosmoSim.hc_qmap()): rho/rhobar = |volume| of the hexahedron spanned by q at the 8 corners of every cell, as the sum of the six
+ * orientation-corrected Kuhn tetrahedra (periodic wrap with +L on the wrapped coordinate).  Index (ix*n + iy)*n + iz.
+ */
+export function dualDensityCpu(q, n) {
+  const N = n * n * n, dx = 1 / n, out = new Float32Array(N);
+  const TET = [[0, 1, 3, 7], [0, 1, 5, 7], [0, 2, 3, 7], [0, 2, 6, 7], [0, 4, 5, 7], [0, 4, 6, 7]];
+  const SG = [1, -1, -1, 1, 1, -1];
+  const c = new Float64Array(24);
+  for (let ix = 0; ix < n; ix++) for (let iy = 0; iy < n; iy++) for (let iz = 0; iz < n; iz++) {
+    for (let b = 0; b < 8; b++) {
+      const jx = ix + (b & 1), jy = iy + ((b >> 1) & 1), jz = iz + ((b >> 2) & 1);
+      const j = 3 * (((jx % n) * n + (jy % n)) * n + (jz % n));
+      c[3 * b] = q[j] + (jx >= n ? 1 : 0); c[3 * b + 1] = q[j + 1] + (jy >= n ? 1 : 0); c[3 * b + 2] = q[j + 2] + (jz >= n ? 1 : 0);
+    }
+    let vol = 0;
+    for (let t = 0; t < 6; t++) {
+      const [a, b, d, e] = TET[t];
+      const e1x = c[3 * b] - c[3 * a], e1y = c[3 * b + 1] - c[3 * a + 1], e1z = c[3 * b + 2] - c[3 * a + 2];
+      const e2x = c[3 * d] - c[3 * a], e2y = c[3 * d + 1] - c[3 * a + 1], e2z = c[3 * d + 2] - c[3 * a + 2];
+      const e3x = c[3 * e] - c[3 * a], e3y = c[3 * e + 1] - c[3 * a + 1], e3z = c[3 * e + 2] - c[3 * a + 2];
+      vol += SG[t] * (e1x * (e2y * e3z - e2z * e3y) - e1y * (e2x * e3z - e2z * e3x) + e1z * (e2x * e3y - e2y * e3x)) / 6;
+    }
+    out[(ix * n + iy) * n + iz] = Math.abs(vol) / (dx * dx * dx);
+  }
+  return out;
+}
+
 const pipeCache = new WeakMap();
 function getPipelines(device) {
   let p = pipeCache.get(device);
@@ -364,6 +451,8 @@ function getPipelines(device) {
         hcScale: mk('hc_scale_in', [U(0), R(1), W(2)]),
         hcLse: mk('hc_lse', [U(0), R(1), W(2)]),
         hcDelta: mk('hc_delta', [U(0), R(1), W(2)]),
+        hcDisp: mk('hc_disp', [U(0), R(1), W(2)]),
+        dualDensity: mk('dual_density', [U(0), R(1), W(2)]),
         bin: mk('bin', [U(0), R(1), R(2), R(3), R(4), W(5)]),
         maxabs: mk('maxabs', [U(0), R(1), W(2)]),
         maps: mk('maps', [U(0), R(1), R(2), W(3)]),
@@ -584,6 +673,36 @@ export class GpuCosmo3D {
     this._dispatch(enc, 'hc', this.P.hcDelta, this.bg('hc-fd', this.P.hcDelta, [R, phi, delta]), u(1, 0), N, 'hc delta');
     if (own) this._submit(enc);
     return { delta, phi, w };
+  }
+
+  // ------------------------------------------------------------------ dual sheet
+  /**
+   * dq = q - x = -D grad Phi_v(x) of the Hopf-Cole inverse map, from the 'hc-phi' buffer of the last hopfCole() (4th-order FD, box
+   * units, periodic) into the persistent buffer 'hc-dq' (3 n^3 f32).
+   */
+  hcDisplacement(D, encoder = null) {
+    const own = !encoder;
+    const enc = encoder || this.device.createCommandEncoder({ label: 'hc dq' });
+    const dq = this.buf('hc-dq', 3 * this.fbytes);
+    const g = this.bg('hc-dq-bg', this.P.hcDisp, [this.ring.resource(32), this.buf('hc-phi', this.fbytes), dq]);
+    this._dispatch(enc, 'hc dq', this.P.hcDisp, g, [['u', this.size], ['u', this.n], 0, 0, D], this.size, 'hc dq');
+    if (own) this._submit(enc);
+    return dq;
+  }
+  /**
+   * "Dual sheet" density rho/rhobar: the mass of the Eulerian cell (i..i+1, j..j+1, k..k+1) is the Lagrangian volume of its preimage,
+   * the hexahedron spanned by the inverse map q(x) = x + dq(x) at the 8 cell corners (periodic wrap, +L on the wrapped coordinate;
+   * volume = sum of the 6 Kuhn tetrahedra of sheet.rs).  `dqBuffer` holds dq = q - x (3 n^3 f32, box units); the result is the
+   * persistent buffer 'dual-rho' (mean 1 up to f32 rounding: the preimages tile Lagrangian space).
+   */
+  dualDensity(dqBuffer, encoder = null) {
+    const own = !encoder;
+    const enc = encoder || this.device.createCommandEncoder({ label: 'dual sheet' });
+    const out = this.buf('dual-rho', this.fbytes);
+    const g = makeBindGroup(this.device, this.P.dualDensity.bgl, [this.ring.resource(32), dqBuffer, out], 'dual sheet');
+    this._dispatch(enc, 'dual', this.P.dualDensity, g, [['u', this.size], ['u', this.n], 0, 0, 0], this.size, 'dual sheet');
+    if (own) this._submit(enc);
+    return out;
   }
 
   // ------------------------------------------------------------------ spectra
