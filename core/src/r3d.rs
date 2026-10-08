@@ -106,7 +106,7 @@ impl Poly<2> {
     }
     /// Split along x[ax] = coord into `out0` (x ≤ coord) and `out1` (x > coord).
     /// Mirrors r2d_split_coord.  `self` is consumed.
-    pub fn split_coord(&mut self, out0: &mut Poly<2>, out1: &mut Poly<2>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>) {
+    pub fn split_coord(&mut self, out0: &mut Poly<2>, out1: &mut Poly<2>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>, map: &mut Vec<i32>) {
         if self.nverts == 0 { out0.nverts = 0; out1.nverts = 0; return; }
         let onv = self.nverts;
         sd.clear(); sd.resize(onv * 3 + 8, 0.0);
@@ -155,7 +155,7 @@ impl Poly<2> {
             self.nbr[vstart][1] = vcur as i32;
             self.nbr[vcur][0] = vstart as i32;
         }
-        compact_split(self, out0, out1, side);
+        compact_split(self, out0, out1, side, map);
     }
 }
 
@@ -261,7 +261,7 @@ impl Poly<3> {
         }
     }
     /// Split along x[ax] = coord (mirrors r3d_split_coord).  `self` is consumed.
-    pub fn split_coord(&mut self, out0: &mut Poly<3>, out1: &mut Poly<3>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>) {
+    pub fn split_coord(&mut self, out0: &mut Poly<3>, out1: &mut Poly<3>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>, map: &mut Vec<i32>) {
         if self.nverts == 0 { out0.nverts = 0; out1.nverts = 0; return; }
         let onv = self.nverts;
         sd.clear(); sd.resize(onv * 3 + 8, 0.0);
@@ -312,30 +312,27 @@ impl Poly<3> {
             self.nbr[vstart][2] = vcur as i32;
             self.nbr[vcur][1] = vstart as i32;
         }
-        compact_split(self, out0, out1, side);
+        compact_split(self, out0, out1, side, map);
     }
 }
 
 fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
 
 /// Compact `src` into out0 (side 0) and out1 (side 1), reindexing neighbours.
-fn compact_split<const D: usize>(src: &mut Poly<D>, out0: &mut Poly<D>, out1: &mut Poly<D>, side: &mut Vec<i32>) {
+/// `src` must not alias the outputs.
+fn compact_split<const D: usize>(src: &Poly<D>, out0: &mut Poly<D>, out1: &mut Poly<D>, side: &[i32], map: &mut Vec<i32>) {
     let total = src.nverts;
     out0.ensure(total); out1.ensure(total);
     out0.nverts = 0; out1.nverts = 0;
-    // map old index -> new index (within its side); copy into temporaries first
-    // because the voxelize stack may alias src with out0.
-    let pos: Vec<[f64; D]> = src.pos[..total].to_vec();
-    let nbr: Vec<[i32; D]> = src.nbr[..total].to_vec();
-    let mut newidx = vec![0i32; total];
+    map.clear(); map.resize(total, 0);
     for v in 0..total {
-        if side[v] == 0 { newidx[v] = out0.nverts as i32; out0.nverts += 1; } else { newidx[v] = out1.nverts as i32; out1.nverts += 1; }
+        if side[v] == 0 { map[v] = out0.nverts as i32; out0.nverts += 1; } else { map[v] = out1.nverts as i32; out1.nverts += 1; }
     }
     let (mut i0, mut i1) = (0usize, 0usize);
     for v in 0..total {
-        let mut nb = nbr[v];
-        for a in 0..D { if nb[a] >= 0 { nb[a] = newidx[nb[a] as usize]; } }
-        if side[v] == 0 { out0.pos[i0] = pos[v]; out0.nbr[i0] = nb; i0 += 1; } else { out1.pos[i1] = pos[v]; out1.nbr[i1] = nb; i1 += 1; }
+        let mut nb = src.nbr[v];
+        for a in 0..D { if nb[a] >= 0 { nb[a] = map[nb[a] as usize]; } }
+        if side[v] == 0 { out0.pos[i0] = src.pos[v]; out0.nbr[i0] = nb; i0 += 1; } else { out1.pos[i1] = src.pos[v]; out1.nbr[i1] = nb; i1 += 1; }
     }
 }
 
@@ -344,53 +341,88 @@ pub fn num_moments(d: usize, order: usize) -> usize {
     match d { 2 => (order + 1) * (order + 2) / 2, _ => (order + 1) * (order + 2) * (order + 3) / 6 }
 }
 
+/// Reusable scratch for `voxelize` (no allocations in the hot loop).
+pub struct VoxWorkspace<const D: usize> {
+    polys: Vec<Poly<D>>,
+    scratch: Poly<D>,
+    iboxes: Vec<([i64; D], [i64; D])>,
+    sd: Vec<f64>,
+    side: Vec<i32>,
+    map: Vec<i32>,
+    mom: Vec<f64>,
+}
+impl<const D: usize> VoxWorkspace<D> {
+    pub fn new(cap: usize) -> Self {
+        VoxWorkspace { polys: (0..64).map(|_| Poly::<D>::with_capacity(cap)).collect(), scratch: Poly::<D>::with_capacity(cap), iboxes: vec![([0; D], [0; D]); 64], sd: Vec::new(), side: Vec::new(), map: Vec::new(), mom: Vec::new() }
+    }
+}
+impl<const D: usize> Default for VoxWorkspace<D> {
+    fn default() -> Self { Self::new(64) }
+}
+
 /// Conservative voxelization: calls `f(cell_index[D], moments)` for every grid
 /// cell (cell size `d`, origin 0, unbounded integer indices) that `poly`
 /// overlaps, with the moments of the overlap region up to `order`.
-pub fn voxelize<const D: usize, F: FnMut([i64; D], &[f64])>(poly: &Poly<D>, d: f64, order: usize, mut f: F)
+pub fn voxelize<const D: usize, F: FnMut([i64; D], &[f64])>(poly: &Poly<D>, d: f64, order: usize, f: F)
+where
+    Poly<D>: Split<D>,
+{
+    let mut ws = VoxWorkspace::<D>::new(poly.nverts + 32);
+    voxelize_ws(&mut ws, poly, d, order, f)
+}
+
+/// `voxelize` with a caller-provided workspace (stack-based bisection along
+/// the grid planes, mirrors r3d_voxelize).
+pub fn voxelize_ws<const D: usize, F: FnMut([i64; D], &[f64])>(ws: &mut VoxWorkspace<D>, poly: &Poly<D>, d: f64, order: usize, mut f: F)
 where
     Poly<D>: Split<D>,
 {
     if poly.nverts == 0 { return; }
     let (lo, hi) = poly.ibox(d);
     let nm = num_moments(D, order);
-    let mut mom = vec![0.0; nm];
-    let mut stack: Vec<(Poly<D>, [i64; D], [i64; D])> = vec![(poly.clone(), lo, hi)];
-    let mut sd = Vec::new();
-    let mut side = Vec::new();
-    while let Some((mut cur, lo, hi)) = stack.pop() {
-        if cur.nverts == 0 { continue; }
+    ws.mom.clear(); ws.mom.resize(nm, 0.0);
+    ws.polys[0].copy_from(poly);
+    ws.iboxes[0] = (lo, hi);
+    let mut nstack = 1usize;
+    while nstack > 0 {
+        nstack -= 1;
+        let (lo, hi) = ws.iboxes[nstack];
+        if ws.polys[nstack].nverts == 0 { continue; }
         let mut spax = 0;
         let mut dmax = hi[0] - lo[0];
         for a in 1..D { if hi[a] - lo[a] > dmax { dmax = hi[a] - lo[a]; spax = a; } }
         if dmax <= 1 {
-            cur.moments(order, &mut mom);
-            f(lo, &mom);
+            let (mom, polys) = (&mut ws.mom, &ws.polys);
+            polys[nstack].moments(order, mom);
+            f(lo, mom);
             continue;
         }
         let half = dmax / 2;
         let split_index = lo[spax] + half;
         let coord = split_index as f64 * d;
-        let mut out0 = Poly::<D>::with_capacity(cur.nverts + 8);
-        let mut out1 = Poly::<D>::with_capacity(cur.nverts + 8);
-        cur.split_coord(&mut out0, &mut out1, coord, spax, &mut sd, &mut side);
+        // split scratch (= polys[nstack]) into polys[nstack] (left) and polys[nstack+1] (right)
+        if ws.polys.len() < nstack + 2 { let cap = ws.polys[0].pos.len(); ws.polys.push(Poly::<D>::with_capacity(cap)); ws.iboxes.push(([0; D], [0; D])); }
+        ws.scratch.copy_from(&ws.polys[nstack]);
+        let (left, right) = ws.polys.split_at_mut(nstack + 1);
+        ws.scratch.split_coord(&mut left[nstack], &mut right[0], coord, spax, &mut ws.sd, &mut ws.side, &mut ws.map);
         let mut hi_left = hi; hi_left[spax] = split_index;
         let mut lo_right = lo; lo_right[spax] = split_index;
-        if out0.nverts > 0 { stack.push((out0, lo, hi_left)); }
-        if out1.nverts > 0 { stack.push((out1, lo_right, hi)); }
+        ws.iboxes[nstack] = (lo, hi_left);
+        ws.iboxes[nstack + 1] = (lo_right, hi);
+        nstack += 2;
     }
 }
 
 /// Dimension-generic access to the split and moment kernels.
 pub trait Split<const D: usize> {
-    fn split_coord(&mut self, out0: &mut Poly<D>, out1: &mut Poly<D>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>);
+    fn split_coord(&mut self, out0: &mut Poly<D>, out1: &mut Poly<D>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>, map: &mut Vec<i32>);
     fn moments(&self, order: usize, out: &mut [f64]);
 }
 impl Split<2> for Poly<2> {
-    fn split_coord(&mut self, out0: &mut Poly<2>, out1: &mut Poly<2>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>) { Poly::<2>::split_coord(self, out0, out1, coord, ax, sd, side) }
+    fn split_coord(&mut self, out0: &mut Poly<2>, out1: &mut Poly<2>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>, map: &mut Vec<i32>) { Poly::<2>::split_coord(self, out0, out1, coord, ax, sd, side, map) }
     fn moments(&self, order: usize, out: &mut [f64]) { Poly::<2>::moments(self, order, out) }
 }
 impl Split<3> for Poly<3> {
-    fn split_coord(&mut self, out0: &mut Poly<3>, out1: &mut Poly<3>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>) { Poly::<3>::split_coord(self, out0, out1, coord, ax, sd, side) }
+    fn split_coord(&mut self, out0: &mut Poly<3>, out1: &mut Poly<3>, coord: f64, ax: usize, sd: &mut Vec<f64>, side: &mut Vec<i32>, map: &mut Vec<i32>) { Poly::<3>::split_coord(self, out0, out1, coord, ax, sd, side, map) }
     fn moments(&self, order: usize, out: &mut [f64]) { Poly::<3>::moments(self, order, out) }
 }

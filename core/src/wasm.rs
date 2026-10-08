@@ -70,6 +70,11 @@ impl CosmoSim {
         if !self.ok_order(1) { return vec![]; }
         self.inner.sheet_density_p1(d, order, ne, ss, 1e4)
     }
+    /// Exact conservative sheet deposit (r3d voxelization): P0 (p1 = false) or P1 (p1 = true).
+    pub fn sheet_density_exact(&self, d: f64, order: usize, ne: usize, p1: bool) -> Vec<f32> {
+        if !self.ok_order(1) { return vec![]; }
+        self.inner.sheet_density_exact(d, order, ne, p1, 1e4)
+    }
     /// Vertex densities 1/|J(q)| on the Lagrangian grid at D (clamped at 1e4), for GPU-side P1 sheets.
     pub fn vertex_density(&self, d: f64, order: usize) -> Vec<f32> {
         if !self.ok_order(1) { return vec![]; }

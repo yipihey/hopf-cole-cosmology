@@ -145,6 +145,15 @@ $m/(|V|\,\overline{\rho_v})$). This "P1 sheet" keeps the exact mass
 bookkeeping and resolves the density gradient inside each cell; it is
 available alongside the plain sheet in the laboratory.
 
+Sampling the simplices at points (even many per cell) leaves a white noise
+floor at high $k$. The laboratory therefore also offers an *exact* deposit:
+every triangle or tetrahedron is clipped against the Eulerian cells it
+overlaps and deposits the exact integral of its P0 or P1 profile, using the
+polyhedral clipping and analytic moment integration of r3d [@powell2015], ported from its Julia version and verified cell by cell against it.
+What remains of the high-$k$ tail after that is the $k^{-3}$ signature of the
+facets of a piecewise-linear map, which only a smoother map (a spectrally
+refined Lagrangian grid or higher-order elements) can remove.
+
 ```{=html}
 <div class="hcc-widget" data-widget="lptorders"></div>
 <script type="module" src="../app/js/widgets.js"></script>

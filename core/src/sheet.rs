@@ -247,3 +247,152 @@ fn rasterize_tet(p: &[[f64; 3]; 4], wv: Option<[f64; 4]>, mass: f64, ne: usize, 
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Exact (conservative) deposition via r3d voxelization
+
+use crate::r3d::{voxelize_ws, Poly, VoxWorkspace};
+
+/// Exact sheet deposit in 2D: every triangle is clipped against the Eulerian
+/// cells (r2d voxelization) and deposits the exact integral of its P0
+/// (constant) or P1 (vertex-interpolated, `wv` given) density profile.
+/// Returns cell-averaged ρ/ρ̄ on an `ne × ne` grid; mass is conserved to
+/// roundoff.
+pub fn sheet_density_2d_exact(grid: &Grid, pos: &[f32], wv: Option<&[f32]>, ne: usize) -> Vec<f32> {
+    assert_eq!(grid.dim, 2);
+    let n = grid.n;
+    let l = grid.l;
+    let dxe = l / ne as f64;
+    let mut mass = vec![0.0f64; ne * ne];
+    let tri_mass = grid.dx() * grid.dx() * 0.5;
+    let get = |i: usize, j: usize, oi: f64, oj: f64| -> [f64; 2] {
+        let idx = ((i % n) * n + (j % n)) * 2;
+        [pos[idx] as f64 + oi, pos[idx + 1] as f64 + oj]
+    };
+    let wgt = |i: usize, j: usize| -> f64 { match wv { Some(w) => w[(i % n) * n + (j % n)] as f64, None => 1.0 } };
+    let order = if wv.is_some() { 1 } else { 0 };
+    let mut poly = Poly::<2>::with_capacity(32);
+    let mut ws = VoxWorkspace::<2>::new(64);
+    for i in 0..n {
+        for j in 0..n {
+            let oi = if i + 1 == n { l } else { 0.0 };
+            let oj = if j + 1 == n { l } else { 0.0 };
+            let p00 = get(i, j, 0.0, 0.0);
+            let p10 = get(i + 1, j, oi, 0.0);
+            let p01 = get(i, j + 1, 0.0, oj);
+            let p11 = get(i + 1, j + 1, oi, oj);
+            let (w00, w10, w01, w11) = (wgt(i, j), wgt(i + 1, j), wgt(i, j + 1), wgt(i + 1, j + 1));
+            for (t, w) in [([p00, p10, p11], [w00, w10, w11]), ([p00, p11, p01], [w00, w11, w01])] {
+                let area2 = (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[2][0] - t[0][0]) * (t[1][1] - t[0][1]);
+                if area2.abs() < 1e-300 { continue; }
+                let area = 0.5 * area2.abs();
+                // barycentric affine functions λ_i(x) = a_i + b_i·x  (for the P1 shape)
+                let mut a = [0.0f64; 3];
+                let mut b = [[0.0f64; 2]; 3];
+                if order == 1 {
+                    let inv = 1.0 / area2;
+                    for c in 0..3 {
+                        let (p1, p2) = (t[(c + 1) % 3], t[(c + 2) % 3]);
+                        // λ_c(x) = ((p1 - x) × (p2 - x)) / area2 = [p1×p2 - x×p2 - p1×x]/area2
+                        a[c] = (p1[0] * p2[1] - p2[0] * p1[1]) * inv;
+                        b[c] = [(p1[1] - p2[1]) * inv, (p2[0] - p1[0]) * inv];
+                    }
+                }
+                let wmean = (w[0] + w[1] + w[2]) / 3.0;
+                let dens = tri_mass / area; // P0 density; P1 shape: dens·(Σ w_i λ_i)/wmean
+                poly.init_triangle(t[0], t[1], t[2]);
+                voxelize_ws(&mut ws, &poly, dxe, order, |c, m| {
+                    let iw = c[0].rem_euclid(ne as i64) as usize;
+                    let jw = c[1].rem_euclid(ne as i64) as usize;
+                    let dm = if order == 0 {
+                        dens * m[0]
+                    } else {
+                        let mut s = 0.0;
+                        for cc in 0..3 { s += w[cc] * (a[cc] * m[0] + b[cc][0] * m[1] + b[cc][1] * m[2]); }
+                        dens * s / wmean
+                    };
+                    mass[iw * ne + jw] += dm;
+                });
+            }
+        }
+    }
+    let cell = dxe * dxe;
+    mass.iter().map(|&m| (m / cell) as f32).collect()
+}
+
+/// Exact sheet deposit in 3D (r3d voxelization of the six Kuhn tetrahedra of
+/// every Lagrangian cell), P0 or P1 (`wv` given).  Cell-averaged ρ/ρ̄ on `ne³`.
+pub fn sheet_density_3d_exact(grid: &Grid, pos: &[f32], wv: Option<&[f32]>, ne: usize) -> Vec<f32> {
+    assert_eq!(grid.dim, 3);
+    let n = grid.n;
+    let l = grid.l;
+    let dxe = l / ne as f64;
+    let mut mass = vec![0.0f64; ne * ne * ne];
+    let tet_mass = grid.dx().powi(3) / 6.0;
+    let get = |i: usize, j: usize, k: usize, off: [f64; 3]| -> [f64; 3] {
+        let idx = (((i % n) * n + (j % n)) * n + (k % n)) * 3;
+        [pos[idx] as f64 + off[0], pos[idx + 1] as f64 + off[1], pos[idx + 2] as f64 + off[2]]
+    };
+    const TETS: [[usize; 4]; 6] = [[0, 1, 3, 7], [0, 1, 5, 7], [0, 2, 3, 7], [0, 2, 6, 7], [0, 4, 5, 7], [0, 4, 6, 7]];
+    let order = if wv.is_some() { 1 } else { 0 };
+    let mut poly = Poly::<3>::with_capacity(64);
+    let mut ws = VoxWorkspace::<3>::new(96);
+    for i in 0..n {
+        let oi = if i + 1 == n { l } else { 0.0 };
+        for j in 0..n {
+            let oj = if j + 1 == n { l } else { 0.0 };
+            for k in 0..n {
+                let ok = if k + 1 == n { l } else { 0.0 };
+                let mut c = [[0.0f64; 3]; 8];
+                let mut cw = [1.0f64; 8];
+                for b in 0..8 {
+                    let (bx, by, bz) = (b & 1, (b >> 1) & 1, (b >> 2) & 1);
+                    c[b] = get(i + bx, j + by, k + bz, [if bx == 1 { oi } else { 0.0 }, if by == 1 { oj } else { 0.0 }, if bz == 1 { ok } else { 0.0 }]);
+                    if let Some(w) = wv { cw[b] = w[(((i + bx) % n) * n + ((j + by) % n)) * n + ((k + bz) % n)] as f64; }
+                }
+                for t in TETS.iter() {
+                    let p = [c[t[0]], c[t[1]], c[t[2]], c[t[3]]];
+                    let w = [cw[t[0]], cw[t[1]], cw[t[2]], cw[t[3]]];
+                    let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+                    let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+                    let e3 = [p[3][0] - p[0][0], p[3][1] - p[0][1], p[3][2] - p[0][2]];
+                    let det = e1[0] * (e2[1] * e3[2] - e2[2] * e3[1]) - e1[1] * (e2[0] * e3[2] - e2[2] * e3[0]) + e1[2] * (e2[0] * e3[1] - e2[1] * e3[0]);
+                    if det.abs() < 1e-300 { continue; }
+                    let vol = det.abs() / 6.0;
+                    let dens = tet_mass / vol;
+                    // barycentric affine functions: λ = M (x - p0) for λ1..3, λ0 = 1 - Σ
+                    let inv = 1.0 / det;
+                    let mrows = [
+                        [(e2[1] * e3[2] - e2[2] * e3[1]) * inv, (e3[0] * e2[2] - e3[2] * e2[0]) * inv, (e2[0] * e3[1] - e2[1] * e3[0]) * inv],
+                        [(e3[1] * e1[2] - e3[2] * e1[1]) * inv, (e1[0] * e3[2] - e1[2] * e3[0]) * inv, (e3[0] * e1[1] - e3[1] * e1[0]) * inv],
+                        [(e1[1] * e2[2] - e1[2] * e2[1]) * inv, (e2[0] * e1[2] - e2[2] * e1[0]) * inv, (e1[0] * e2[1] - e1[1] * e2[0]) * inv],
+                    ];
+                    // λ_c(x) = a_c + b_c·x
+                    let mut a = [1.0f64, 0.0, 0.0, 0.0];
+                    let mut bb = [[0.0f64; 3]; 4];
+                    for r in 0..3 {
+                        let bc = mrows[r];
+                        let ac = -(bc[0] * p[0][0] + bc[1] * p[0][1] + bc[2] * p[0][2]);
+                        a[r + 1] = ac; bb[r + 1] = bc;
+                        a[0] -= ac; for q in 0..3 { bb[0][q] -= bc[q]; }
+                    }
+                    let wmean = (w[0] + w[1] + w[2] + w[3]) / 4.0;
+                    poly.init_tet(p);
+                    voxelize_ws(&mut ws, &poly, dxe, order, |cidx, m| {
+                        let iw = cidx[0].rem_euclid(ne as i64) as usize;
+                        let jw = cidx[1].rem_euclid(ne as i64) as usize;
+                        let kw = cidx[2].rem_euclid(ne as i64) as usize;
+                        let dm = if order == 0 { dens * m[0] } else {
+                            let mut s = 0.0;
+                            for cc in 0..4 { s += w[cc] * (a[cc] * m[0] + bb[cc][0] * m[1] + bb[cc][1] * m[2] + bb[cc][2] * m[3]); }
+                            dens * s / wmean
+                        };
+                        mass[(iw * ne + jw) * ne + kw] += dm;
+                    });
+                }
+            }
+        }
+    }
+    let cell = dxe * dxe * dxe;
+    mass.iter().map(|&m| (m / cell) as f32).collect()
+}

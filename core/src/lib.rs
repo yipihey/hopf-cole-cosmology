@@ -140,6 +140,16 @@ impl Cosmo {
         let w: Vec<f32> = j.iter().map(|&v| (1.0 / v.abs().max(1.0 / wmax)) as f32).collect();
         if self.grid.dim == 3 { sheet::sheet_density_3d_weighted(&self.grid, &pos, Some(&w), ne, ss) } else { sheet::sheet_density_2d_weighted(&self.grid, &pos, Some(&w), ne, ss) }
     }
+    /// Exact (r3d-voxelized, conservative) sheet deposit, P0 or P1 (vertex 1/|J| interpolated).
+    pub fn sheet_density_exact(&self, d: f64, order: usize, ne: usize, p1: bool, wmax: f64) -> Vec<f32> {
+        let pos = self.positions(d, order);
+        let w: Option<Vec<f32>> = if p1 {
+            let mut j = vec![0.0f64; self.grid.size];
+            self.lpt_ref().jacobian(d, order, &mut j);
+            Some(j.iter().map(|&v| (1.0 / v.abs().max(1.0 / wmax)) as f32).collect())
+        } else { None };
+        if self.grid.dim == 3 { sheet::sheet_density_3d_exact(&self.grid, &pos, w.as_deref(), ne) } else { sheet::sheet_density_2d_exact(&self.grid, &pos, w.as_deref(), ne) }
+    }
     pub fn cic_density(&self, d: f64, order: usize, ne: usize) -> Vec<f32> {
         let pos = self.positions(d, order);
         sheet::cic_density(self.grid.dim, &pos, self.grid.size, self.grid.l, ne)

@@ -546,3 +546,48 @@ fn sheet_p1_interpolated() {
     println!("3D P1 sheet mean {m:.4}");
     assert!((m - 1.0).abs() < 0.03);
 }
+
+#[test]
+fn exact_sheet_deposit() {
+    use hcc_core::ics::Preset;
+    // plane wave: the exact P0 deposit equals the exact cell average of the piecewise-constant field,
+    // and both exact deposits conserve mass to roundoff
+    let n = 128usize;
+    let mut c = Cosmo::new(2, n, 1.0);
+    c.set_ic_preset(Preset::PlaneWaves { modes: vec![([2, 0, 0], 1.0, 0.0)] }, 0.0, 0.0);
+    c.build_lpt(1);
+    let (a, k, d) = (1.0f64, 2.0 * std::f64::consts::PI * 2.0, 0.6f64);
+    let t0 = std::time::Instant::now();
+    let p0 = c.sheet_density_exact(d, 1, n, false, 1e4);
+    let p1 = c.sheet_density_exact(d, 1, n, true, 1e4);
+    println!("2D exact deposits at 128² took {:?}", t0.elapsed());
+    let ss8 = c.sheet_density_p1(d, 1, n, 8, 1e4);
+    let qof = |x: f64| { let mut q = x; for _ in 0..60 { let f = q - d * a * (k * q).sin() / k - x; let fp = 1.0 - d * a * (k * q).cos(); q -= f / fp; } q };
+    let (mut e0, mut e1, mut e8, mut nn) = (0.0, 0.0, 0.0, 0.0);
+    for i in 0..n {
+        let exact = (qof((i + 1) as f64 / n as f64) - qof(i as f64 / n as f64)) * n as f64;
+        e0 += (p0[i * n] as f64 - exact).powi(2); e1 += (p1[i * n] as f64 - exact).powi(2); e8 += (ss8[i * n] as f64 - exact).powi(2); nn += exact * exact;
+    }
+    let m0: f64 = p0.iter().map(|&v| v as f64).sum::<f64>() / p0.len() as f64;
+    let m1: f64 = p1.iter().map(|&v| v as f64).sum::<f64>() / p1.len() as f64;
+    println!("exact P0 rel err {:.3e} (mean {m0:.9}), exact P1 rel err {:.3e} (mean {m1:.9}), point-sampled P1 ss=8 rel err {:.3e}", (e0 / nn).sqrt(), (e1 / nn).sqrt(), (e8 / nn).sqrt());
+    assert!((m0 - 1.0).abs() < 1e-7 && (m1 - 1.0).abs() < 1e-7, "mass conservation");
+    assert!(e1 <= e8 * 1.05, "exact P1 should be at least as good as 8x supersampled P1");
+    // 3D: mass conservation on a Gaussian field, and agreement with the point-sampled tets
+    let mut c = Cosmo::new(3, 24, 1.0);
+    c.set_ic_gaussian(PkShape::PowerLaw { n: -1.0 }, 0.1, 5, 1.0);
+    c.build_lpt(2);
+    let d = 0.7 * c.shell_crossing(2);
+    let t0 = std::time::Instant::now();
+    let x0 = c.sheet_density_exact(d, 2, 24, false, 1e4);
+    let x1 = c.sheet_density_exact(d, 2, 24, true, 1e4);
+    println!("3D exact deposits at 24³ took {:?}", t0.elapsed());
+    let ps = c.sheet_density_p1(d, 2, 24, 3, 1e4);
+    let m0: f64 = x0.iter().map(|&v| v as f64).sum::<f64>() / x0.len() as f64;
+    let m1: f64 = x1.iter().map(|&v| v as f64).sum::<f64>() / x1.len() as f64;
+    let mut e = 0.0; let mut nn = 0.0;
+    for i in 0..x1.len() { e += (x1[i] as f64 - ps[i] as f64).powi(2); nn += (ps[i] as f64 - 1.0).powi(2); }
+    println!("3D: means {m0:.9} {m1:.9}, exact P1 vs point-sampled P1 (ss=3) rel rms {:.3e}", (e / nn).sqrt());
+    assert!((m0 - 1.0).abs() < 1e-6 && (m1 - 1.0).abs() < 1e-6);
+    assert!((e / nn).sqrt() < 0.1);
+}
