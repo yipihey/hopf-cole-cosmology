@@ -7,11 +7,15 @@ import { el, fmtNum } from './dom.js';
 
 export const DUAL_COLOR = '#6a3d9a';
 export const P1_COLOR = '#a0522d';
+export const EXACT0_COLOR = '#9a9a00';
+export const EXACT1_COLOR = '#0aa5b5';
 
 const SERIES = [
   ['lin', 'linear theory'],
   ['sheet', 'sheet (measured)'],
   ['sheetp1', 'sheet P1 (vertex-interpolated)'],
+  ['sheetx', 'sheet exact P0 (clipped)'],
+  ['sheetxp1', 'sheet exact P1 (clipped)'],
   ['cic', 'CIC (deconv.)'],
   ['hc', 'Hopf–Cole (selected source)'],
   ['hcdual', 'Hopf–Cole dual sheet'],
@@ -46,7 +50,7 @@ export class Spectra {
     this.csOut = readout(cbs, { label: 'c_s²' });
     this.pkHost = el('div', 'lab-plot', pp);
     this.pkPlot = new LinePlot(this.pkHost, { width: 500, height: 380 });
-    el('p', 'hcc-note lab-cap', pp, 'Dashed vertical lines mark k_Nyq and the smoothing scale 1/R. The P1 sheet interpolates the vertex densities 1/|J| linearly inside every simplex (mass-conserving, second-order accurate), so it carries less high-k rasterization noise than the plain sheet. The Hopf–Cole dual sheet is the mass-conserving density of the same inverse map (cell mass = Lagrangian volume of the cell’s preimage). Linear theory is the smooth curve D²P0(k); the 1-loop curves are only available for Gaussian ICs. The EFT curve subtracts 2c_s²k²P_lin from the SPT 1-loop with c_s² fitted to the measured spectrum for k < k_max.');
+    el('p', 'hcc-note lab-cap', pp, 'Dashed vertical lines mark k_Nyq and the smoothing scale 1/R. The P1 sheet interpolates the vertex densities 1/|J| linearly inside every simplex (mass-conserving, second-order accurate), so it carries less high-k rasterization noise than the plain sheet. The exact sheet deposits clip every simplex against the cells it overlaps and integrate its (constant or vertex-interpolated) density over each piece: no sampling noise, mass conserved to roundoff, so their spectra sit below the point-sampled ones at high k, where only the facet structure of the simplices remains. The Hopf–Cole dual sheet is the mass-conserving density of the same inverse map (cell mass = Lagrangian volume of the cell’s preimage). Linear theory is the smooth curve D²P0(k); the 1-loop curves are only available for Gaussian ICs. The EFT curve subtracts 2c_s²k²P_lin from the SPT 1-loop with c_s² fitted to the measured spectrum for k < k_max.');
 
     // ---- r(k) panel
     const rp = this.rPanel = el('div', 'hcc-panel lab-panel', grid);
@@ -73,6 +77,8 @@ export class Spectra {
     const d3 = this.app.S.mode === 3;
     this.checks.sheet.el.querySelector('.hcc-label').textContent = d3 ? 'sheet (tetrahedra)' : 'sheet (measured)';
     this.checks.sheetp1.el.querySelector('.hcc-label').textContent = d3 ? 'sheet P1 (tetrahedra)' : 'sheet P1 (vertex-interpolated)';
+    this.checks.sheetx.el.querySelector('.hcc-label').textContent = d3 ? 'sheet exact P0 (tetrahedra)' : 'sheet exact P0 (clipped)';
+    this.checks.sheetxp1.el.querySelector('.hcc-label').textContent = d3 ? 'sheet exact P1 (tetrahedra)' : 'sheet exact P1 (clipped)';
     this.checks.cic.el.querySelector('.hcc-label').textContent = d3 ? 'CIC (measured, deconv.)' : 'CIC (deconv.)';
     const ser = this.app.S.ser;
     for (const id of Object.keys(this.checks)) this.checks[id].set(ser.includes(id));
@@ -95,6 +101,8 @@ export class Spectra {
     // 3D GPU path: `need` runs the GPU FFT once per field and seeds P(k), r(k) and the Fourier maps
     if (w.has('sheet')) t.push({ label: dim === 3 ? 'P(k) sheet (tetrahedra)' : 'P(k) sheet', fn: async () => { await e.need('analysis', 'sheet', P); e.pk('sheet', P, false); } });
     if (w.has('sheetp1')) t.push({ label: dim === 3 ? 'P(k) sheet P1 (tetrahedra)' : 'P(k) sheet P1', fn: async () => { await e.need('analysis', 'sheetp1', P); e.pk('sheetp1', P, false); } });
+    if (w.has('sheetx')) t.push({ label: 'P(k) sheet exact P0', heavy: dim === 3 && !e.gpuActive(P), fn: async () => { await e.need('analysis', 'sheetx', P); e.pk('sheetx', P, false); } });
+    if (w.has('sheetxp1')) t.push({ label: 'P(k) sheet exact P1', heavy: dim === 3 && !e.gpuActive(P), fn: async () => { await e.need('analysis', 'sheetxp1', P); e.pk('sheetxp1', P, false); } });
     if (w.has('cic')) t.push({ label: 'P(k) CIC', fn: async () => { await e.need('analysis', 'cic', P); e.pk('cic', P, true); } });
     if (w.has('hc')) t.push({ label: 'P(k) Hopf–Cole', fn: async () => { await e.need('analysis', 'hc', P); e.pk('hc', P); } });
     if (w.has('hcdual')) t.push({ label: 'P(k) Hopf–Cole dual sheet', fn: async () => { await e.need('analysis', 'hcdual', P); e.pk('hcdual', P); } });
@@ -102,6 +110,7 @@ export class Spectra {
       await e.need('analysis', prim, P); await e.need('analysis', 'hc', P); e.rk(prim, P); e.rk('hc', P); e.sigmaV2();
       if (w.has('hcdual')) { await e.need('analysis', 'hcdual', P); e.rk('hcdual', P); }
       if (w.has('sheetp1')) { await e.need('analysis', 'sheetp1', P); e.rk('sheetp1', P); }
+      for (const m of ['sheetx', 'sheetxp1']) if (w.has(m)) { await e.need('analysis', m, P); e.rk(m, P); }
     } });
     const loops = gaussian && (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13') || w.has('za'));
     // lite: show the measured spectra first, the 1-loop curves (0.3 s in WASM) follow in a second drawing; only when this section is visible
@@ -136,6 +145,8 @@ export class Spectra {
       const s = e.pk('sheetp1', P, false);
       series.push({ x: s.k, y: s.p, label: dim === 3 ? 'sheet P1 (tetrahedra)' : 'sheet P1', color: P1_COLOR, points: true, width: 1.2, radius: 2.2 });
     }
+    if (w.has('sheetx')) { const s = e.pk('sheetx', P, false); series.push({ x: s.k, y: s.p, label: dim === 3 ? 'sheet exact P0 (tetrahedra)' : 'sheet exact P0', color: EXACT0_COLOR, points: true, width: 1.2, radius: 2.2 }); }
+    if (w.has('sheetxp1')) { const s = e.pk('sheetxp1', P, false); series.push({ x: s.k, y: s.p, label: dim === 3 ? 'sheet exact P1 (tetrahedra)' : 'sheet exact P1', color: EXACT1_COLOR, points: true, width: 1.2, radius: 2.2 }); }
     if (w.has('cic')) {
       const s = e.pk('cic', P, true);
       series.push(dim === 2 ? { x: s.k, y: s.p, label: 'CIC (deconv.)', color: PALETTE[5], points: true, width: 1, radius: 2 }
@@ -188,6 +199,8 @@ export class Spectra {
     rs.push({ x: rp.k, y: rp.r, label: `${dim === 2 ? 'sheet' : 'CIC'} × linear`, color: PALETTE[0], points: true, width: 2.4, opacity: 0.7, radius: 2.5 });
     rs.push({ x: rh.k, y: rh.r, label: 'Hopf–Cole' + hcTag + ' × linear', color: PALETTE[1], points: true, width: 1.2, radius: 2 });
     if (w.has('sheetp1')) { const r1 = e.rk('sheetp1', P); rs.push({ x: r1.k, y: r1.r, label: `${dim === 2 ? 'sheet' : 'tetrahedral sheet'} P1 × linear`, color: P1_COLOR, points: true, width: 1.2, radius: 2.2 }); }
+    if (w.has('sheetx')) { const rx = e.rk('sheetx', P); rs.push({ x: rx.k, y: rx.r, label: `${dim === 2 ? 'sheet' : 'tetrahedral sheet'} exact P0 × linear`, color: EXACT0_COLOR, points: true, width: 1.2, radius: 2.2 }); }
+    if (w.has('sheetxp1')) { const rx = e.rk('sheetxp1', P); rs.push({ x: rx.k, y: rx.r, label: `${dim === 2 ? 'sheet' : 'tetrahedral sheet'} exact P1 × linear`, color: EXACT1_COLOR, points: true, width: 1.2, radius: 2.2 }); }
     if (w.has('hcdual')) { const rd = e.rk('hcdual', P); rs.push({ x: rd.k, y: rd.r, label: 'Hopf–Cole dual sheet' + hcTag + ' × linear', color: DUAL_COLOR, points: true, width: 1.2, radius: 2 }); }
     const sv2 = e.sigmaV2();
     if (sv2 !== null) {

@@ -5,8 +5,8 @@ import { fmap, percentiles, mean, minmax } from '../hcc.js';
 
 export const LIN_MAX = 5;       // upper colour limit for non-log density maps
 
-const SUB_OF = [['sheet', 'sheet'], ['sheetp1', 'sheet (P1)'], ['cic', 'CIC'], ['hc', 'Hopf–Cole'], ['hcdual', 'Hopf–Cole dual sheet'], ['lin', 'linear']];
-const OF_NAME = { sheet: 'sheet', sheetp1: 'P1 sheet', cic: 'CIC', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' };
+const SUB_OF = [['sheet', 'sheet'], ['sheetp1', 'sheet (P1)'], ['sheetx', 'sheet (exact P0)'], ['sheetxp1', 'sheet (exact P1)'], ['cic', 'CIC'], ['hc', 'Hopf–Cole'], ['hcdual', 'Hopf–Cole dual sheet'], ['lin', 'linear']];
+const OF_NAME = { sheet: 'sheet', sheetp1: 'P1 sheet', sheetx: 'exact P0 sheet', sheetxp1: 'exact P1 sheet', cic: 'CIC', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' };
 
 /** Shift the raw FFT-ordered n×n map [ikx*n+iky] so that k = 0 sits at the centre. */
 export function fftshift2D(a, n) {
@@ -16,6 +16,13 @@ export function fftshift2D(a, n) {
     for (let j = 0; j < n; j++) out[ii * n + (j + h) % n] = a[i * n + j];
   }
   return out;
+}
+
+/** Where an exact deposit was computed (GPU clipper or WASM) and how many triangles/tetrahedra were skipped by the bounding-box clamp. */
+export function exactNote(e, which) {
+  const i = e && e.exactInfo && e.exactInfo[which];
+  if (!i) return '';
+  return ` Computed ${i.path === 'GPU' ? 'on the GPU (WGSL clipping kernel, 18-bit fixed-point atomics)' : 'in the Rust core (r3d voxelization)'}` + (i.skipped ? `; ${i.skipped} simplices spanning more than the bounding-box limit were skipped (their mass is missing).` : '.');
 }
 
 /**
@@ -48,6 +55,16 @@ export const CATALOG = {
     label: 'Sheet density (CPU rasterized)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
     data: (e, P) => e.sheet(P),
     caption: () => 'Exact sheet density Σ 1/|J| over all streams, point-sampled with 2×2 supersampling in the Rust core. Same quantity as the GPU panel.',
+  },
+  sheetx: {
+    label: 'Sheet density (exact P0)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', need: 'sheetx',
+    data: (e, P) => e.sheetExact(P, false),
+    caption: (sub, P, e) => 'Every simplex is clipped against the cells it overlaps and deposits the exact integral of its (constant) density; no sampling noise, mass conserved to roundoff.' + exactNote(e, 'sheetx'),
+  },
+  sheetxp1: {
+    label: 'Sheet density (exact P1)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', need: 'sheetxp1',
+    data: (e, P) => e.sheetExact(P, true),
+    caption: (sub, P, e) => 'Every simplex is clipped against the cells it overlaps and deposits the exact integral of its vertex-interpolated (linear) density profile; no sampling noise, mass conserved to roundoff.' + exactNote(e, 'sheetxp1'),
   },
   cic: {
     label: 'CIC density', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
@@ -122,7 +139,7 @@ export const CATALOG = {
   },
 };
 
-export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'sheetp1gpu', 'sheetp1cpu', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed'];
+export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'sheetp1gpu', 'sheetp1cpu', 'sheetx', 'sheetxp1', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed'];
 
 /** Percentile-based range helpers for special classes. */
 export function psihatRange(arr) {

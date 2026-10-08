@@ -582,6 +582,12 @@ fn exact_sheet_deposit() {
     let x0 = c.sheet_density_exact(d, 2, 24, false, 1e4);
     let x1 = c.sheet_density_exact(d, 2, 24, true, 1e4);
     println!("3D exact deposits at 24³ took {:?}", t0.elapsed());
+    // post shell crossing (sliver tetrahedra): mass still conserved to roundoff
+    let dpost = 1.5 * c.shell_crossing(2);
+    let xp = c.sheet_density_exact(dpost, 2, 24, true, 1e4);
+    let mp: f64 = xp.iter().map(|&v| v as f64).sum::<f64>() / xp.len() as f64;
+    println!("3D post-crossing exact P1 mean {mp:.9}");
+    assert!((mp - 1.0).abs() < 1e-6, "post-crossing mass {}", mp);
     let ps = c.sheet_density_p1(d, 2, 24, 3, 1e4);
     let m0: f64 = x0.iter().map(|&v| v as f64).sum::<f64>() / x0.len() as f64;
     let m1: f64 = x1.iter().map(|&v| v as f64).sum::<f64>() / x1.len() as f64;

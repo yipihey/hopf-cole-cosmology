@@ -13,7 +13,16 @@ import { LinePlot, PALETTE } from '../viz/plot.js';
 import { slider, readout } from '../viz/ui.js';
 import { transpose2D, slice3D, percentiles } from '../hcc.js';
 import { el, sel, fmtNum } from './dom.js';
-import { DUAL_COLOR, P1_COLOR } from './spectra.js';
+import { Engine } from './engine.js';
+import { DUAL_COLOR, P1_COLOR, EXACT0_COLOR, EXACT1_COLOR } from './spectra.js';
+
+/** Reference sheet choices: S.sref -> Engine field name, short label, spectrum colour. */
+const REFS = {
+  plain: { name: 'sheet', label: 'sheet', color: PALETTE[0] },
+  p1: { name: 'sheetp1', label: 'P1 sheet', color: P1_COLOR },
+  x: { name: 'sheetx', label: 'exact P0 sheet', color: EXACT0_COLOR },
+  xp1: { name: 'sheetxp1', label: 'exact P1 sheet', color: EXACT1_COLOR },
+};
 
 const DENS_CMAP = 'magma', DIFF_CMAP = 'rdbu';
 
@@ -78,8 +87,8 @@ export class LegendreLab {
     const bar = this.bar = el('div', 'hcc-controls lab-fbar', this.root);
     this.rmin = slider(bar, { label: 'ρ min', min: 0.01, max: 1, value: S.rmin, log: true, onInput: (v) => { S.rmin = v; this.rangeChanged(); } });
     this.rmax = slider(bar, { label: 'ρ max', min: 3, max: 1000, value: S.rmax, log: true, onInput: (v) => { S.rmax = v; this.rangeChanged(); } });
-    this.refSel = sel(bar, { label: 'sheet reference', options: [['plain', 'plain (constant per simplex)'], ['p1', 'P1 (vertex-interpolated)']], value: S.sref,
-      title: 'Which sheet density the three difference maps, the readouts and the spectrum ratios are measured against. The P1 sheet interpolates the vertex densities 1/|J| linearly inside each simplex (exactly mass conserving, second-order accurate), so it has much less rasterization noise than the plain sheet.',
+    this.refSel = sel(bar, { label: 'sheet reference', options: [['plain', 'plain (constant per simplex)'], ['p1', 'P1 (vertex-interpolated)'], ['x', 'exact P0 (clipped)'], ['xp1', 'exact P1 (clipped)']], value: S.sref,
+      title: 'Which sheet density the three difference maps, the readouts and the spectrum ratios are measured against. The P1 sheet interpolates the vertex densities 1/|J| linearly inside each simplex (exactly mass conserving, second-order accurate), so it has much less rasterization noise than the plain sheet. The exact options clip every simplex against the cells it overlaps and deposit the exact integral of its (constant or vertex-interpolated) density: no sampling noise at all and mass conserved to roundoff.',
       onChange: (v) => { S.sref = v; this.app.hashChanged(); this.refChanged(); } });
     this.sliceBar = el('span', 'lab-leg-slice', bar);
     this.axSel = sel(this.sliceBar, { label: 'slice axis ⟂', options: [[0, 'x'], [1, 'y'], [2, 'z']], value: S.sa, onChange: (v) => { S.sa = Number(v); this.sliceMoved(); } });
@@ -144,7 +153,8 @@ export class LegendreLab {
     this.warn3.textContent = d3 ? 'Reference: the tetrahedral sheet density (six Kuhn simplices per Lagrangian cell, point-sampled). With GPU compute on, the nLPT build, the sheet, the Legendre inversion (including the transverse correction) and the spectra all run in WebGPU compute shaders (milliseconds at 64³–128³); otherwise WASM (about 1 s at 64³). Slices share the axis and index of the slice panel in the Fields section.' : '';
   }
   /** Name of the reference sheet field in the Engine. */
-  refName() { return this.app.S.sref === 'p1' ? 'sheetp1' : 'sheet'; }
+  refName() { return (REFS[this.app.S.sref] || REFS.plain).name; }
+  refInfo() { return REFS[this.app.S.sref] || REFS.plain; }
   refChanged() {
     this.refSel.set(this.app.S.sref);
     if (this.app.visible('l') && this.app.eng.sim && this.app.eng.dim === this.app.S.mode) this.app.runSection('l');
@@ -182,9 +192,9 @@ export class LegendreLab {
     const e = this.app.eng, d3 = P.mode === 3;
     const t = [];
     const gpu3 = d3 && e.gpuActive(P);
-    this.warnBig.hidden = !(d3 && !gpu3 && P.n > 64);
-    const ref = this.refName(), p1 = ref === 'sheetp1';
-    t.push({ label: (d3 ? (gpu3 ? 'Legendre lab: sheet (tetrahedra, GPU)' : 'Legendre lab: sheet (tetrahedra, CPU)') : 'Legendre lab: sheet') + (p1 ? ' P1' : ''), heavy: d3 && !gpu3,
+    const ref = this.refName(), ri = this.refInfo(), exact = Engine.isExact(ref);
+    this.warnBig.hidden = !(d3 && !gpu3 && P.n > (exact ? 32 : 64));
+    t.push({ label: (d3 ? (gpu3 ? 'Legendre lab: sheet (tetrahedra, GPU)' : 'Legendre lab: sheet (tetrahedra, CPU)') : 'Legendre lab: sheet') + (ri.name !== 'sheet' ? ' ' + ri.label.replace(' sheet', '') : ''), heavy: d3 && !gpu3,
       fn: async () => { await e.need('field', ref, P); e.delta(ref, P); } });
     t.push({ label: 'Legendre lab: Hopf–Cole (Legendre, Zel’dovich)', fn: async () => {
       await e.need('field', 'hcl', P); await e.need('field', 'hcz', P);
@@ -215,7 +225,7 @@ export class LegendreLab {
     if (!e.sim || e.dim !== P.mode) return;
     this.lastP = P;
     const n = P.n, order = P.order;
-    const rf = this.refName(), p1 = rf === 'sheetp1', rn = p1 ? 'P1 sheet' : 'sheet';
+    const rf = this.refName(), ri = this.refInfo(), rn = ri.name === 'sheet' ? 'sheet' : ri.label, p1 = ri.name !== 'sheet', exact = Engine.isExact(rf);
     const dS = e.delta(rf, P), dL = e.delta('hcl', P), dZ = e.delta('hcz', P), dU = e.delta('hcldual', P);
     const ref = Math.max(rmsOf(dS), 1e-12);
     const diffL = subtract(dL, dS), diffZ = subtract(dZ, dS), diffU = subtract(dU, dS);
@@ -228,7 +238,7 @@ export class LegendreLab {
 
     const lpt = P.hs === 'lptT' ? `${ordName(order)}${order > 2 ? ' + transverse' : ''}` : ordName(order);
     const where = P.mode === 3 ? ` on the plane ${['x', 'y', 'z'][S.sa]} = ${Math.max(0, Math.min(n - 1, Math.round(S.si * (n - 1))))} of ${n}` : '';
-    this.pSheet.titleEl.textContent = `${p1 ? 'P1 sheet' : 'Sheet'} density (${ordName(order)})`;
+    this.pSheet.titleEl.textContent = `${p1 ? ri.label[0].toUpperCase() + ri.label.slice(1) : 'Sheet'} density (${ordName(order)})`;
     this.pLeg.titleEl.textContent = `Legendre Hopf–Cole (${lpt})`;
     this.pZel.titleEl.textContent = 'Zel’dovich Hopf–Cole (1LPT)';
     this.pdLeg.titleEl.textContent = `Legendre − ${rn}`;
@@ -238,12 +248,14 @@ export class LegendreLab {
     this.ro.zel.label.textContent = `rms(ZelHC − ${rn}) / rms(${rn} − 1)`;
     this.ro.dual.label.textContent = `rms(dual − ${rn}) / rms(${rn} − 1)`;
     const nuTxt = `ν = ${P.nu.toExponential(1)}`;
-    this.pSheet.cap.textContent = (p1
+    this.pSheet.cap.textContent = (exact
+      ? `Multi-stream reference without sampling noise: every ${P.mode === 3 ? 'Kuhn tetrahedron' : 'triangle'} of the ${ordName(order)} map x(q,D) is clipped against the cells it overlaps and deposits the exact integral of its ${rf === 'sheetxp1' ? 'vertex-interpolated (linear 1/|J|)' : 'constant'} density profile; mass is conserved to roundoff${where}. After shell crossing it adds the streams.`
+      : p1
       ? `Multi-stream reference with a linear density shape: inside each ${P.mode === 3 ? 'Kuhn tetrahedron' : 'triangle'} of the ${ordName(order)} map x(q,D) the density is interpolated between the vertex values 1/|J|, rescaled so that every simplex deposits exactly its mass${P.mode === 3 ? ' (point-sampled)' : ' (2×2 supersampled)'}${where}. Its rasterization noise is far smaller than that of the plain sheet; after shell crossing it adds the streams.`
       : `Multi-stream reference: Σ 1/|J| over all streams of the ${ordName(order)} map x(q,D)${P.mode === 3 ? ' (Kuhn tetrahedra)' : ' (2×2 supersampled triangles)'}${where}. It carries rasterization noise at the cell scale that shrinks with N, and after shell crossing it adds the streams.`);
     this.pLeg.cap.textContent = `1+δ = det(I − ∇∇Φ), Φ the Legendre transform (Hopf–Lax minimum, heat-kernel smoothed: ${nuTxt}) of q²/2 + S(q) for the ${lpt} potential S; particle-free, on the Eulerian grid. Before shell crossing this is the exact ${ordName(order)} density; afterwards it keeps one stream per point (adhesion), so walls replace the multi-stream regions.`;
     this.pZel.cap.textContent = `The same solver with the Zel’dovich potential S = −Dϕ: the Burgers/adhesion solution (${nuTxt}). It is exact for the Zel’dovich map and misses the 2LPT and higher displacement, so filaments sit slightly off.`;
-    this.pdLeg.cap.textContent = `Δ(1+δ) = Legendre − ${rn}, symmetric colour scale ±${fmtNum(dr, 2)}. Before shell crossing the residual is the ${p1 ? 'P1 sheet’s remaining discretization error' : 'sheet’s rasterization noise'} (shrinks with N) plus ν-smoothing${order > 2 ? ' and the neglected or approximately corrected transverse displacement' : ''}; after shell crossing the sheet sums streams, so it exceeds the Legendre density inside the folds.`;
+    this.pdLeg.cap.textContent = `Δ(1+δ) = Legendre − ${rn}, symmetric colour scale ±${fmtNum(dr, 2)}. Before shell crossing the residual is the ${exact ? 'exact sheet’s remaining discretization error (its simplex facets; there is no sampling noise)' : p1 ? 'P1 sheet’s remaining discretization error' : 'sheet’s rasterization noise'} (shrinks with N) plus ν-smoothing${order > 2 ? ' and the neglected or approximately corrected transverse displacement' : ''}; after shell crossing the sheet sums streams, so it exceeds the Legendre density inside the folds.`;
     this.pdZel.cap.textContent = `Δ(1+δ) = Zel’dovich HC − ${rn} on the same scale. Here the residual is dominated by what 1LPT lacks: the 2LPT and higher displacement shifts the filaments and changes their amplitude; compare the amplitude with the Legendre map.`;
     this.pdDual.cap.textContent = `Δ(1+δ) = dual sheet − ${rn} on the same scale (the dual sheet of the ${lpt} inverse map, ${nuTxt}). The mass of a cell is the Lagrangian volume of its preimage under the inverse map, so it is exactly mass conserving and does not under-resolve peaks as finite-difference Hessians do; before shell crossing it should be closer to the sheet than both Hopf–Cole densities once the viscous smoothing is small (ν near the grid floor Δx²/4D), where the remaining residual is the sheet’s rasterization noise plus ν.`;
 
@@ -282,13 +294,13 @@ export class LegendreLab {
   drawSpectra(P) {
     const e = this.app.eng, dim = e.dim;
     const kmax = Math.sqrt(dim) * e.knyq, kmin = 0.8 * e.kf;
-    const ref = this.refName(), p1 = ref === 'sheetp1';
-    this.pkTitle.textContent = `Power spectra: ${p1 ? 'P1 sheet' : 'sheet'}, Legendre, Zel’dovich HC, dual sheet`;
+    const ref = this.refName(), ri = this.refInfo(), p1 = ri.name !== 'sheet';
+    this.pkTitle.textContent = `Power spectra: ${ri.label}, Legendre, Zel’dovich HC, dual sheet`;
     const sh = e.pk(ref, P, false), le = e.pk('hcl', P, false), ze = e.pk('hcz', P, false), du = e.pk('hcldual', P, false), li = e.plinFine(P);
     const lpt = P.hs === 'lptT' && P.order > 2 ? 'Legendre (nLPT + transverse)' : 'Legendre (nLPT)';
     const series = [
       { x: li.k, y: li.p, label: 'linear D²P₀', color: '#8a8f98', width: 1.6, dash: '5 3' },
-      { x: sh.k, y: sh.p, label: (p1 ? 'P1 sheet' : 'sheet') + (dim === 3 ? ' (tetrahedra)' : ''), color: p1 ? P1_COLOR : PALETTE[0], points: true, width: 3, opacity: 0.55, radius: 3 },
+      { x: sh.k, y: sh.p, label: ri.label + (dim === 3 ? ' (tetrahedra)' : ''), color: ri.color, points: true, width: 3, opacity: 0.55, radius: 3 },
       { x: le.k, y: le.p, label: lpt, color: PALETTE[2], points: true, width: 1.2, radius: 2.2 },
       { x: ze.k, y: ze.p, label: 'Zel’dovich HC', color: PALETTE[1], points: true, width: 1.2, radius: 2.2 },
       { x: du.k, y: du.p, label: 'dual sheet', color: DUAL_COLOR, points: true, width: 1.2, radius: 2.2 },
@@ -307,12 +319,12 @@ export class LegendreLab {
       return { x, y };
     };
     const rl = ratio(le), rz = ratio(ze), ru = ratio(du);
-    this.ratioPlot.setAxes({ xlog: true, ylog: false, xlabel: 'k  [rad / L]', ylabel: p1 ? 'P / P_sheet,P1' : 'P / P_sheet', xlim: [kmin, kmax], ylim: [0.5, 1.5] });
+    this.ratioPlot.setAxes({ xlog: true, ylog: false, xlabel: 'k  [rad / L]', ylabel: p1 ? `P / P_(${ri.label})` : 'P / P_sheet', xlim: [kmin, kmax], ylim: [0.5, 1.5] });
     this.ratioPlot.setSeries([
       { x: [kmin, kmax], y: [1, 1], label: '1', color: '#8a8f98', dash: '5 3', width: 1.2 },
-      { ...rl, label: p1 ? 'P_Legendre / P_P1' : 'P_Legendre / P_sheet', color: PALETTE[2], points: true, width: 1.6, radius: 2.6 },
-      { ...rz, label: p1 ? 'P_ZelHC / P_P1' : 'P_ZelHC / P_sheet', color: PALETTE[1], points: true, width: 1.6, radius: 2.6 },
-      { ...ru, label: p1 ? 'P_dual / P_P1' : 'P_dual / P_sheet', color: DUAL_COLOR, points: true, width: 1.6, radius: 2.6 },
+      { ...rl, label: p1 ? `P_Legendre / P_${ri.label}` : 'P_Legendre / P_sheet', color: PALETTE[2], points: true, width: 1.6, radius: 2.6 },
+      { ...rz, label: p1 ? `P_ZelHC / P_${ri.label}` : 'P_ZelHC / P_sheet', color: PALETTE[1], points: true, width: 1.6, radius: 2.6 },
+      { ...ru, label: p1 ? `P_dual / P_${ri.label}` : 'P_dual / P_sheet', color: DUAL_COLOR, points: true, width: 1.6, radius: 2.6 },
     ]);
     this.ratioPlot.setMarkers(markers);
     this.ratioPlot.draw();

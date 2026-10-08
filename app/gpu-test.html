@@ -16,12 +16,15 @@
 <body>
   <h1>WebGPU compute self-test</h1>
   <p>Validates <code>js/gpu/fft3d.js</code>, <code>cosmo3d.js</code>, and the GPU-resident nLPT pipeline (<code>lpt3d.js</code>: term build,
-     D<sub>sc</sub>, Legendre inversion with the transverse correction; <code>sheet3d.js</code>: tetrahedral sheet and its P1 (vertex-interpolated) variant; the dual-sheet density
+     D<sub>sc</sub>, Legendre inversion with the transverse correction; <code>sheet3d.js</code>: tetrahedral sheet, its P1 (vertex-interpolated) variant and the exact clipped deposits; the dual-sheet density
      of the Hopf&ndash;Cole inverse map in <code>cosmo3d.js</code>) against the WASM core and times
      each stage. URL options (comma lists of grid sizes): <code>?auto=1&amp;val=32,64&amp;bench=64,128&amp;lval=32,64&amp;lbench=64,128&amp;wo128=4</code>;
      <code>val</code>/<code>bench</code>: FFT, positions, CIC, Hopf&ndash;Cole, spectra; <code>lval</code>: nLPT checks (EdS 4LPT and
      &Lambda;CDM &Omega;<sub>m</sub> = 0.3 3LPT); <code>lbench</code>: nLPT stage timings; <code>wo128</code>: LPT order of the WASM reference at 128&sup3;
-     (0 = skip); <code>skipold=1</code> skips the older checks.</p>
+     (0 = skip); <code>skipold=1</code> skips the older checks.
+     Exact (clipping-based) sheet deposits (<code>exact2d.js</code>: triangles, <code>exact3d.js</code> + <code>sheet3d.js</code>: tetrahedra, P0 and P1): per-cell moments of the 70 r3d fixtures
+     (<code>fixtures_r3d.txt</code>, Julia R3D.jl reference), full deposits against WASM <code>sheet_density_exact</code> (<code>exval3=32,64</code>, <code>exval2=128,256</code>)
+     and timings (<code>exbench2=256,512</code>, <code>exbench3=64,128</code>); <code>onlyexact=1</code> runs only these, <code>noexact=1</code> skips them, <code>nofix=1</code> skips the fixtures.</p>
   <button id="run">Run</button>
   <table id="tbl"><tr><th>n</th><th>check</th><th>value</th><th>tolerance</th><th>result</th></tr></table>
   <pre id="out"></pre>

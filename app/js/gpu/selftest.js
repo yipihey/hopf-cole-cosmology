@@ -5,10 +5,12 @@ import { loadCore } from '../hcc.js';
 import { getGPU } from '../viz/gpu.js';
 import { GpuFFT3D } from './fft3d.js';
 import { GpuCosmo3D, dualDensityCpu } from './cosmo3d.js';
-import { STORAGE_RW } from './util.js';
+import { STORAGE_RW, readF32 } from './util.js';
 import { getTerms, getUnmergedSpec, growthUnmerged } from './terms.js';
 import { GpuLpt3D } from './lpt3d.js';
 import { GpuSheet3D } from './sheet3d.js';
+import { GpuExact2D, exactFixtures2D } from './exact2d.js';
+import { exactFixtures3D } from './exact3d.js';
 
 const out = document.getElementById('out');
 const tbl = document.getElementById('tbl');
@@ -484,7 +486,233 @@ export async function benchLpt(core, gpu, n, { order = 4, wasmOrder = order, was
   return R;
 }
 
-export async function runAll({ val = [32, 64], ben = [64, 128], lval = [32, 64], lben = [64, 128], wasmOrder128 = 4, skipOld = false } = {}) {
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// exact (clipping-based) sheet deposition: r3d fixtures, full deposits vs the WASM reference
+
+/** Parse js/gpu/fixtures_r3d.txt: [{dim, v: Float64Array, d, order, cells: Map "i,j[,k]" -> moments[]}]. */
+async function loadFixtures() {
+  const txt = await (await fetch(new URL('./fixtures_r3d.txt', import.meta.url))).text();
+  const lines = txt.split('\n').filter((l) => l.trim().length);
+  const out = [];
+  for (let i = 0; i < lines.length;) {
+    const h = lines[i++].trim().split(/\s+/);
+    const dim = h[0] === 'T2' ? 2 : 3;
+    const nv = dim === 2 ? 6 : 12;
+    const v = Float64Array.from(h.slice(1, 1 + nv).map(Number));
+    const d = Number(h[1 + nv]), order = Number(h[2 + nv]);
+    const nc = Number(lines[i++].trim().split(/\s+/)[1]);
+    const cells = new Map();
+    for (let c = 0; c < nc; c++) {
+      const t = lines[i++].trim().split(/\s+/).map(Number);
+      cells.set(t.slice(0, dim).join(','), t.slice(dim));
+    }
+    out.push({ dim, v, d, order, cells });
+  }
+  return out;
+}
+
+/** Compare GPU cell moments (Map cell -> [m0, m1..]) with a fixture: max error over cells per moment, relative to the largest cell moment. */
+function fixtureError(fx, got, nmom) {
+  let s = 0; for (const m of fx.cells.values()) s += m[0];
+  const sign = s < 0 ? -1 : 1;                  // the reference keeps the sign of the input orientation
+  const err = new Array(nmom).fill(0), scale = new Array(nmom).fill(0);
+  const keys = new Set([...fx.cells.keys(), ...got.keys()]);
+  for (let m = 0; m < nmom; m++) for (const m0 of fx.cells.values()) scale[m] = Math.max(scale[m], Math.abs(m0[m]));
+  let missing = 0;
+  for (const k of keys) {
+    const r = fx.cells.get(k), g = got.get(k);
+    for (let m = 0; m < nmom; m++) {
+      const a = r ? sign * r[m] : 0, b = g ? g[m] : 0;
+      err[m] = Math.max(err[m], Math.abs(a - b) / scale[m]);
+    }
+    if (!r !== !g) { const x = r ? Math.abs(r[0]) : Math.abs(g[0]); if (x > 1e-6 * scale[0]) missing++; }
+  }
+  return { err, missing };
+}
+
+async function validateExactFixtures(gpu) {
+  const { device } = gpu;
+  log('--- exact deposition: r3d fixtures (Julia R3D.jl reference), per-cell moments of order <= 1');
+  const fx = await loadFixtures();
+  for (const dim of [2, 3]) {
+    const set = fx.filter((f) => f.dim === dim);
+    const t0 = performance.now();
+    const res = await (dim === 2 ? exactFixtures2D : exactFixtures3D)(device, set.map((f) => ({ v: f.v, d: f.d })));
+    const ms = performance.now() - t0;
+    const nmom = dim + 1;
+    let worst0 = 0, worst1 = 0, miss = 0, worst = '';
+    set.forEach((f, i) => {
+      const { err, missing } = fixtureError(f, res.cells[i], nmom);
+      miss += missing;
+      const e1 = Math.max(...err.slice(1));
+      if (err[0] > worst0) worst0 = err[0];
+      if (e1 > worst1) worst1 = e1;
+      if (err[0] > 1e-5 || e1 > 1e-5) worst += ` [case ${i} order ${f.order}: ${err.map((x) => x.toExponential(1)).join(' ')}]`;
+    });
+    const nm = set.length;
+    log(`${dim}D fixtures: ${nm} cases (${set.filter((f) => f.order <= 1).length} of order <= 1, the order-2 ones compared up to first moments), ${res.records} cell records, box overflow ${res.overflowBox}, ${ms.toFixed(0)} ms${worst}`);
+    record(`fixtures ${dim}D`, `${nm} r3d cases: max |m0 - ref| / max|m0|`, worst0, 1e-5);
+    record(`fixtures ${dim}D`, `${nm} r3d cases: max |m1 - ref| / max|m1|`, worst1, 1e-5);
+    record(`fixtures ${dim}D`, `${nm} r3d cases: cells with |m0| > 1e-6 max missing or spurious`, miss, 0.5, (v) => String(v));
+    record(`fixtures ${dim}D`, `${nm} r3d cases: skipped (bounding box / vertex cap)`, res.overflowBox + (res.overflowCap || 0), 0.5, (v) => String(v));
+  }
+}
+
+
+/** Displacement (x - q, box units, interleaved xyz) from WASM positions on the n^3 Lagrangian grid. */
+function posToPsi3(pw, n) {
+  const N = n ** 3, o = new Float32Array(3 * N);
+  for (let i = 0; i < N; i++) {
+    const ix = Math.floor(i / (n * n)), iy = Math.floor(i / n) % n, iz = i % n;
+    o[3 * i] = pw[3 * i] - ix / n; o[3 * i + 1] = pw[3 * i + 1] - iy / n; o[3 * i + 2] = pw[3 * i + 2] - iz / n;
+  }
+  return o;
+}
+const upload = (device, a) => { const b = device.createBuffer({ size: Math.max(16, a.byteLength), usage: STORAGE_RW }); device.queue.writeBuffer(b, 0, a); return b; };
+const fmtMs = (v) => (v == null ? '-' : v.toFixed(v < 10 ? 2 : 0));
+
+/** 3-D: full exact deposits (P0 / P1) against sim.sheet_density_exact at D before and after the first shell crossing. */
+async function validateExact3(core, gpu, n) {
+  const { device } = gpu;
+  const tag = `exact ${n}^3`;
+  const order = 2, N = n ** 3;
+  log(`--- exact sheet deposit 3D n = ${n}, ${order}LPT`);
+  const { sim } = await makeSim(core, n, 1, order);
+  const g = new GpuCosmo3D(device, n); await g.init();
+  const sheet = new GpuSheet3D(g); await sheet.init();
+  const dsc = sim.shell_crossing(order);
+  const Ds = [0.5 * dsc, 1.5 * dsc].map((x) => +x.toPrecision(3));
+  log(`D_sc(${order}LPT) = ${dsc.toFixed(3)}; testing D = ${Ds.join(', ')}`);
+  for (const D of Ds) {
+    const label = `D=${D}${D > dsc ? ' (multi-stream)' : ''}`;
+    const psi = upload(device, posToPsi3(sim.positions(D, order), n));
+    const wW = upload(device, sim.vertex_density(D, order));
+    for (const p1 of [false, true]) {
+      const ref = sim.sheet_density_exact(D, order, n, p1);
+      const t0 = performance.now();
+      const rho = await g.readField(sheet.densityExact(psi, p1 ? wW : null));
+      const ms = performance.now() - t0;
+      const st = await sheet.stats();
+      // the WASM P1 deposit of sliver tetrahedra near caustics (multi-stream, 64^3) is itself only good to ~4e-3: its coarse-grained 128^3 deposit
+      // differs from its 64^3 deposit by that much and its mass is off by 5e-6, because the f64 moment formula a_c m0 + b_c.m1 cancels at 1/thickness;
+      // the GPU kernel interpolates the density at the polytope vertices and does not (mean exactly 1)
+      const tol = p1 && D > dsc ? 5e-3 : 1e-4;
+      record(tag, `${p1 ? 'P1' : 'P0'} ${label}, WASM positions${p1 ? ' and vertex densities' : ''}: rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(rho, ref) / rms(Float32Array.from(ref, (v) => v - 1)), tol);
+      record(tag, `${p1 ? 'P1' : 'P0'} ${label}: |mean(rho_gpu) - 1|  (WASM ${mean(ref).toFixed(7)}; ${ms.toFixed(0)} ms incl. readback)`, Math.abs(mean(rho) - 1), 2e-5);
+      record(tag, `${p1 ? 'P1' : 'P0'} ${label}: tetrahedra skipped (bbox > ${12} cells / vertex cap)`, st.skippedBox + st.skippedCap, 0.5, (v) => String(v));
+    }
+    psi.destroy(); wW.destroy();
+  }
+  {
+    // the bounding-box clamp: with a 2-cell limit the larger tetrahedra are skipped, counted, and their mass is missing
+    const psi = upload(device, posToPsi3(sim.positions(Ds[1], order), n));
+    const rho = await g.readField(sheet.densityExact(psi, null, null, { maxb: 2 }));
+    const st = await sheet.stats();
+    log(`bounding-box clamp test (maxb = 2, D = ${Ds[1]}): ${st.skippedBox} tetrahedra skipped, mean(rho) = ${mean(rho).toFixed(5)}`);
+    record(tag, `clamp counter works: 1 / (1 + skipped tetrahedra at maxb = 2)`, 1 / (1 + st.skippedBox), 0.5, (v) => v.toExponential(2));
+    record(tag, `skipped tetrahedra lose their mass: mean(rho) - 0.9999 (must be <= 0)`, mean(rho) - 0.9999, 0, (v) => v.toExponential(2));
+    psi.destroy();
+  }
+  sheet.destroy(); g.destroy(); sim.free();
+}
+
+/** 3-D: the whole GPU chain (GPU displacement and GPU vertex densities) against the WASM exact deposit. */
+async function validateExact3Chain(core, gpu, n) {
+  const { device } = gpu;
+  const tag = `exact ${n}^3 GPU chain`;
+  const order = 2;
+  log(`--- exact sheet deposit 3D GPU chain n = ${n}`);
+  const { sim } = await makeSim(core, n, 1, order);
+  const T = getTerms(sim, n);
+  const g = new GpuCosmo3D(device, n); await g.init();
+  await g.uploadTerms(T.terms, T.orders);
+  const sheet = new GpuSheet3D(g); await sheet.init();
+  const dsc = sim.shell_crossing(order), D = +(0.5 * dsc).toPrecision(3);
+  const disp = g.displacement(T.gvals(D), order);
+  for (const p1 of [false, true]) {
+    const w = p1 ? sheet.vertexWeights(disp) : null;
+    const rho = await g.readField(sheet.densityExact(disp, w));
+    const ref = sim.sheet_density_exact(D, order, n, p1);
+    record(tag, `${p1 ? 'P1 (GPU Jacobian)' : 'P0'} D=${D}: rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(rho, ref) / rms(Float32Array.from(ref, (v) => v - 1)), p1 ? 1e-3 : 1e-4);
+    record(tag, `${p1 ? 'P1' : 'P0'} D=${D}: |mean(rho_gpu) - 1|`, Math.abs(mean(rho) - 1), 2e-5);
+  }
+  sheet.destroy(); g.destroy(); sim.free();
+}
+
+/** 2-D: exact triangle deposits against sim.sheet_density_exact (ne = n and ne = 2 n). */
+async function validateExact2(core, gpu, n) {
+  const { device } = gpu;
+  const tag = `exact ${n}^2`;
+  const order = 2;
+  log(`--- exact sheet deposit 2D n = ${n}`);
+  const sim = new core.CosmoSim(2, n, 1);
+  sim.set_ic_gaussian(0, -1, 0, 0.05, 1, 1);
+  sim.build_lpt(order);
+  const dsc = sim.shell_crossing(order);
+  const ex = await new GpuExact2D(device).init();
+  const Ds = [0.5 * dsc, 1.5 * dsc].map((x) => +x.toPrecision(3));
+  log(`D_sc(${order}LPT) = ${dsc.toFixed(3)}; testing D = ${Ds.join(', ')}`);
+  for (const D of Ds) {
+    const label = `D=${D}${D > dsc ? ' (multi-stream)' : ''}`;
+    const pos = upload(device, sim.positions(D, order));
+    const wW = upload(device, sim.vertex_density(D, order));
+    for (const ne of (D < dsc ? [n, 2 * n] : [n])) {
+      for (const p1 of [false, true]) {
+        const ref = sim.sheet_density_exact(D, order, ne, p1);
+        const t0 = performance.now();
+        const rho = await readF32(device, ex.density(pos, p1 ? wW : null, ne), ne * ne);
+        const ms = performance.now() - t0;
+        const st = await ex.stats();
+        const nm = `${p1 ? 'P1' : 'P0'} ${label}${ne !== n ? `, ne=${ne}` : ''}`;
+        record(tag, `${nm}: rms(rho_gpu - rho_wasm) / rms(rho_wasm - 1)`, rmsDiff(rho, ref) / rms(Float32Array.from(ref, (v) => v - 1)), 1e-4);
+        record(tag, `${nm}: |mean(rho_gpu) - 1|  (WASM ${mean(ref).toFixed(7)}; ${ms.toFixed(1)} ms incl. readback)`, Math.abs(mean(rho) - 1), 2e-5);
+        record(tag, `${nm}: triangles skipped (bbox > 24 cells)`, st.skippedBox, 0.5, (v) => String(v));
+      }
+    }
+    pos.destroy(); wW.destroy();
+  }
+  ex.destroy(); sim.free();
+}
+
+/** Timings of the exact deposits (GPU, with and without readback; WASM for reference). */
+async function benchExact(core, gpu, dim, n, { wasm = true } = {}) {
+  const { device } = gpu;
+  const order = dim === 2 ? 2 : 1;
+  log(`--- exact deposit benchmark ${dim}D n = ${n} (${order}LPT positions from WASM)`);
+  const sim = new core.CosmoSim(dim, n, 1);
+  sim.set_ic_gaussian(0, -1, 0, 0.05, 1, 1);
+  sim.build_lpt(order);
+  const dsc = sim.shell_crossing(order);
+  const R = { dim, n, order, dsc };
+  let g = null, sheet = null, ex = null;
+  if (dim === 3) { g = new GpuCosmo3D(device, n); await g.init(); sheet = new GpuSheet3D(g); await sheet.init(); } else ex = await new GpuExact2D(device).init();
+  for (const [name, D] of [['pre', 0.5 * dsc], ['post', 1.5 * dsc]]) {
+    const pos = sim.positions(D, order);
+    const buf = upload(device, dim === 3 ? posToPsi3(pos, n) : pos);
+    const w = upload(device, sim.vertex_density(D, order));
+    const dev = dim === 3 ? sheet : ex;
+    const run = (p1) => (dim === 3 ? sheet.densityExact(buf, p1 ? w : null) : ex.density(buf, p1 ? w : null, n));
+    for (const p1 of [false, true]) {
+      const k = `${p1 ? 'p1' : 'p0'}_${name}`;
+      R[`gpu_${k}`] = await msOf(g || { sync: () => device.queue.onSubmittedWorkDone() }, () => run(p1), 3);
+      const st = await dev.stats();
+      R[`skipped_${k}`] = st.skippedBox + (st.skippedCap || 0);
+      if (wasm) {
+        const t0 = performance.now();
+        sim.sheet_density_exact(D, order, n, p1);
+        R[`wasm_${k}`] = performance.now() - t0;
+      }
+    }
+    if (dim === 3) R[`gpu_weights_${name}`] = await msOf(g, () => sheet.vertexWeights(buf), 3);
+    buf.destroy(); w.destroy();
+  }
+  log(JSON.stringify(R, (k, v) => (typeof v === 'number' ? +v.toPrecision(4) : v)));
+  if (sheet) sheet.destroy(); if (ex) ex.destroy(); if (g) g.destroy(); sim.free();
+  return R;
+}
+
+export async function runAll({ val = [32, 64], ben = [64, 128], lval = [32, 64], lben = [64, 128], wasmOrder128 = 4, skipOld = false, onlyExact = false, noExact = false, exFix = true, exVal3 = [32, 64], exVal2 = [128, 256], exBench2 = [256, 512], exBench3 = [64, 128] } = {}) {
   const res = { rows, bench: [], lbench: [], error: null };
   window.__gpuTest = res;
   try {
@@ -492,6 +720,22 @@ export async function runAll({ val = [32, 64], ben = [64, 128], lval = [32, 64],
     const gpu = await getGPU();
     if (!gpu) { log('WebGPU not available'); res.error = 'no webgpu'; return res; }
     log(`adapter limits: maxStorageBufferBindingSize ${(gpu.device.limits.maxStorageBufferBindingSize / 1048576)} MiB, maxBufferSize ${(gpu.device.limits.maxBufferSize / 1048576)} MiB`);
+    if (!noExact) {
+      if (exFix) await validateExactFixtures(gpu);
+    }
+    if (!noExact) {
+      for (const n of exVal3) await validateExact3(core, gpu, n);
+      for (const n of exVal3.slice(0, 1)) await validateExact3Chain(core, gpu, n);
+      for (const n of exVal2) await validateExact2(core, gpu, n);
+      for (const n of exBench2) res.exBench2 = [...(res.exBench2 || []), await benchExact(core, gpu, 2, n, { wasm: n <= 256 })];
+      for (const n of exBench3) res.exBench3 = [...(res.exBench3 || []), await benchExact(core, gpu, 3, n, { wasm: n <= 64 })];
+    }
+    if (onlyExact) {
+      const fails = rows.filter((r) => !r.pass).length;
+      log(fails ? `FAILED: ${fails} of ${rows.length}` : `ALL ${rows.length} CHECKS PASSED`);
+      res.fails = fails; res.done = true;
+      return res;
+    }
     if (!skipOld) {
       for (const n of val) await validate(core, gpu, n);
       await validate(core, gpu, 32, { om: 0.3, order: 3 });          // flat LCDM: 8 LPT terms, numerically integrated growth
@@ -514,6 +758,6 @@ export async function runAll({ val = [32, 64], ben = [64, 128], lval = [32, 64],
 
 const q = new URLSearchParams(location.search);
 const list = (k, d) => (q.has(k) ? q.get(k).split(',').filter(Boolean).map(Number) : d);
-const opts = () => ({ val: list('val', [32, 64]), ben: list('bench', [64, 128]), lval: list('lval', [32, 64]), lben: list('lbench', [64, 128]), wasmOrder128: list('wo128', [4])[0], skipOld: q.has('skipold') });
+const opts = () => ({ val: list('val', [32, 64]), ben: list('bench', [64, 128]), lval: list('lval', [32, 64]), lben: list('lbench', [64, 128]), wasmOrder128: list('wo128', [4])[0], skipOld: q.has('skipold'), onlyExact: q.has('onlyexact'), noExact: q.has('noexact'), exFix: !q.has('nofix'), exVal3: list('exval3', [32, 64]), exVal2: list('exval2', [128, 256]), exBench2: list('exbench2', [256, 512]), exBench3: list('exbench3', [64, 128]) });
 document.getElementById('run').addEventListener('click', () => runAll(opts()));
 if (q.has('auto')) runAll(opts());

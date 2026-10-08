@@ -7,6 +7,7 @@ import { slider, checkbox } from '../viz/ui.js';
 import { transpose2D } from '../hcc.js';
 import { el, sel, fmtNum } from './dom.js';
 import { CATALOG, KIND_ORDER, LIN_MAX, psihatRange } from './catalog.js';
+import { Engine } from './engine.js';
 
 const CMAPS = Object.keys(COLORMAPS).map((c) => [c, c]);
 const KIND_OPTIONS = KIND_ORDER.map((k) => [k, CATALOG[k].label]);
@@ -119,7 +120,7 @@ class Slot {
     try {
       let { kind, def, sub, cmap, log } = this.cfg;
       this.syncHidden(def);
-      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG[def.cpu] : def).caption(sub, P);
+      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG[def.cpu] : def).caption(sub, P, eng);
       this.note.hidden = true;
       const n = eng.n;
       if (def.gpu && this.app.gpu) {
@@ -134,7 +135,11 @@ class Slot {
         this.note.textContent = 'WebGPU unavailable: showing the CPU-rasterized ' + (def.p1 ? 'P1 ' : '') + 'sheet density instead.';
       }
       const fv = await this.ensureFV();
+      // exact (clipped) sheet deposits come from the GPU clipper when available: make them resident before the synchronous getters run
+      const needF = def.need || ((def.fourier && Engine.isExact(sub)) ? sub : null);
+      if (needF) await eng.need('field', needF, P);
       const arr = drawDef.data(eng, P, sub);
+      if (needF) this.cap.textContent = def.caption(sub, P, eng);
       if (!arr || arr.length < n * n) throw new Error(`panel data has ${arr ? arr.length : 0} values, expected ${n * n}`);
       fv.setField(transpose2D(arr, n), n, n);
       fv.setColormap(cmap);

@@ -41,6 +41,13 @@ const NOTES = [
       In 2D the GPU panel interpolates w across each triangle in the rasterizer; in 3D the GPU kernel evaluates the barycentric coordinates at every sample point and takes w from a finite-difference Jacobian of the displacement.`,
   },
   {
+    title: 'Exact (clipped) sheet deposits',
+    html: `Point sampling puts a density value at the centre of each Eulerian cell, so the sheet carries a white-noise floor at the cell scale. The <i>exact</i> deposits remove it: every simplex of the deformed Lagrangian grid is <b>clipped</b> against the axis-aligned planes of each Eulerian cell it overlaps (a port of the r2d/r3d polytope clipper of D. Powell, used here through its vertex-graph representation), and the cell receives the exact integral of the simplex’s density over the clipped piece, ∫ρ dV.
+      For the <i>P0</i> shape (constant density m/|V| per simplex) that is the clipped volume times m/|V|; for the <i>P1</i> shape (vertex densities 1/|J| interpolated barycentrically, normalised to the simplex mass) it is the clipped volume times the shape evaluated at the centroid of the piece, which is exact because the shape is linear.
+      No simplex mass is lost or created: the mean density is 1 to roundoff (a few 10⁻⁷ in the f32 GPU kernels), and the result is the true cell average rather than a sample. Expect the high-k part of P(k) of the exact deposits to sit below the point-sampled ones (no white-noise floor), while the facet tail of the simplicial sheet itself remains.
+      On the GPU one thread handles a Lagrangian cell (two triangles or six tetrahedra); the simplex is clipped slab by slab (x, then y, then z) so that the outer clips are shared by all the cells behind them, the masses are summed with 18-bit fixed-point integer atomics (a cell overflows at ρ/ρ̄ ≥ 16384), and a simplex whose bounding box spans more than 12 cells per axis in 3D (24 in 2D) is skipped and counted. Without the GPU the Rust core does the same with r3d voxelization in double precision (about 30 ms at 256² in 2D, 2–3 s at 64³ in 3D, against 1–2 ms and 25–40 ms on the GPU).`,
+  },
+  {
     title: 'One-point PDFs of the density',
     html: `The <i>PDFs</i> section histograms log₁₀(1+δ) cell by cell for every method, once on the raw grid and once after smoothing with a top-hat sphere (a disc in 2D) of adjustable diameter, so the one-point statistics of the sheet, CIC, the Hopf–Cole variants and linear theory can be compared directly.
       Linear theory gives a Gaussian δ and therefore negative densities as soon as the rms contrast approaches one; gravity instead empties the voids towards a minimum density and builds a long high-density tail that is roughly lognormal (Coles &amp; Jones 1991).

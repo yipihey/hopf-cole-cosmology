@@ -282,7 +282,11 @@ pub fn sheet_density_2d_exact(grid: &Grid, pos: &[f32], wv: Option<&[f32]>, ne: 
             let p01 = get(i, j + 1, 0.0, oj);
             let p11 = get(i + 1, j + 1, oi, oj);
             let (w00, w10, w01, w11) = (wgt(i, j), wgt(i + 1, j), wgt(i, j + 1), wgt(i + 1, j + 1));
-            for (t, w) in [([p00, p10, p11], [w00, w10, w11]), ([p00, p11, p01], [w00, w11, w01])] {
+            for (t0, w) in [([p00, p10, p11], [w00, w10, w11]), ([p00, p11, p01], [w00, w11, w01])] {
+                // work relative to a lattice-aligned base corner near the simplex: keeps the
+                // barycentric evaluation well conditioned on thin simplices (no cancellation)
+                let base = [(t0[0][0] / dxe).floor() as i64, (t0[0][1] / dxe).floor() as i64];
+                let t = [[t0[0][0] - base[0] as f64 * dxe, t0[0][1] - base[1] as f64 * dxe], [t0[1][0] - base[0] as f64 * dxe, t0[1][1] - base[1] as f64 * dxe], [t0[2][0] - base[0] as f64 * dxe, t0[2][1] - base[1] as f64 * dxe]];
                 let area2 = (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[2][0] - t[0][0]) * (t[1][1] - t[0][1]);
                 if area2.abs() < 1e-300 { continue; }
                 let area = 0.5 * area2.abs();
@@ -302,8 +306,8 @@ pub fn sheet_density_2d_exact(grid: &Grid, pos: &[f32], wv: Option<&[f32]>, ne: 
                 let dens = tri_mass / area; // P0 density; P1 shape: dens·(Σ w_i λ_i)/wmean
                 poly.init_triangle(t[0], t[1], t[2]);
                 voxelize_ws(&mut ws, &poly, dxe, order, |c, m| {
-                    let iw = c[0].rem_euclid(ne as i64) as usize;
-                    let jw = c[1].rem_euclid(ne as i64) as usize;
+                    let iw = (c[0] + base[0]).rem_euclid(ne as i64) as usize;
+                    let jw = (c[1] + base[1]).rem_euclid(ne as i64) as usize;
                     let dm = if order == 0 {
                         dens * m[0]
                     } else {
@@ -351,8 +355,11 @@ pub fn sheet_density_3d_exact(grid: &Grid, pos: &[f32], wv: Option<&[f32]>, ne: 
                     if let Some(w) = wv { cw[b] = w[(((i + bx) % n) * n + ((j + by) % n)) * n + ((k + bz) % n)] as f64; }
                 }
                 for t in TETS.iter() {
-                    let p = [c[t[0]], c[t[1]], c[t[2]], c[t[3]]];
+                    let p0 = [c[t[0]], c[t[1]], c[t[2]], c[t[3]]];
                     let w = [cw[t[0]], cw[t[1]], cw[t[2]], cw[t[3]]];
+                    let base = [(p0[0][0] / dxe).floor() as i64, (p0[0][1] / dxe).floor() as i64, (p0[0][2] / dxe).floor() as i64];
+                    let mut p = p0;
+                    for v in 0..4 { for a in 0..3 { p[v][a] -= base[a] as f64 * dxe; } }
                     let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
                     let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
                     let e3 = [p[3][0] - p[0][0], p[3][1] - p[0][1], p[3][2] - p[0][2]];
@@ -379,9 +386,9 @@ pub fn sheet_density_3d_exact(grid: &Grid, pos: &[f32], wv: Option<&[f32]>, ne: 
                     let wmean = (w[0] + w[1] + w[2] + w[3]) / 4.0;
                     poly.init_tet(p);
                     voxelize_ws(&mut ws, &poly, dxe, order, |cidx, m| {
-                        let iw = cidx[0].rem_euclid(ne as i64) as usize;
-                        let jw = cidx[1].rem_euclid(ne as i64) as usize;
-                        let kw = cidx[2].rem_euclid(ne as i64) as usize;
+                        let iw = (cidx[0] + base[0]).rem_euclid(ne as i64) as usize;
+                        let jw = (cidx[1] + base[1]).rem_euclid(ne as i64) as usize;
+                        let kw = (cidx[2] + base[2]).rem_euclid(ne as i64) as usize;
                         let dm = if order == 0 { dens * m[0] } else {
                             let mut s = 0.0;
                             for cc in 0..4 { s += w[cc] * (a[cc] * m[0] + bb[cc][0] * m[1] + bb[cc][1] * m[2] + bb[cc][2] * m[3]); }

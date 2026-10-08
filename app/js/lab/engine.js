@@ -7,6 +7,8 @@ import { unpackSpectrum, unpackLoop, transpose2D } from '../hcc.js';
 import { GpuCosmo3D } from '../gpu/cosmo3d.js';
 import { GpuLpt3D } from '../gpu/lpt3d.js';
 import { GpuSheet3D } from '../gpu/sheet3d.js';
+import { GpuExact2D } from '../gpu/exact2d.js';
+import { STORAGE_RW, readF32 } from '../gpu/util.js';
 import { getUnmergedSpec } from '../gpu/terms.js';
 import { gpu3dRefusal } from './perf.js';
 import { ENV } from './state.js';
@@ -41,6 +43,9 @@ export class Engine {
     this.g = null;                // GpuCosmo3D for the current grid
     this.lpt = null;              // GpuLpt3D: nLPT build, D_sc, Legendre split (all on the GPU)
     this.sheetG = null;           // GpuSheet3D: tetrahedral sheet density
+    this.ex2 = null;              // GpuExact2D: exact (clipped) triangle deposit of the 2D lab
+    this.gpu2dFailed = false;     // the 2D exact deposit failed on the GPU: WASM from now on (until the device changes)
+    this.exactInfo = {};          // field name -> {path, skipped} of the last exact deposit (for the captions)
     this.gTerms = null;           // {order, count} of the GPU-built raw LPT terms
     this.hsim = null;             // 8^3 helper CosmoSim: term list and growth functions g_tau(D) (grid independent), see ensureGrowth()
     this.hsOrder = 0; this.gSpec = null; this.gvCache = new Map();
@@ -66,6 +71,7 @@ export class Engine {
 
   dispose() {
     this.releaseGpu();
+    this.releaseEx2();
     this.freeGrowthSim();
     if (this.sim) { try { this.sim.free(); } catch (e) { /* already freed */ } }
     this.sim = null; this.builtOrder = 0; this.wOrder = 0;
@@ -109,6 +115,8 @@ export class Engine {
     if (which === 'hcl') return P.hs === 'lptT' ? 'lptT' : 'lpt';
     return P.hs || 'zel';
   }
+  /** The exact (clipping-based) sheet deposits: 'sheetx' = P0 (constant per simplex), 'sheetxp1' = P1 (vertex-interpolated). */
+  static isExact(which) { return which === 'sheetx' || which === 'sheetxp1'; }
   static isHc(which) { return which === 'hc' || which === 'hcz' || which === 'hcl'; }
   /** The 'dual sheet' variants of the Hopf-Cole fields: the same inverse map q(x), mass-conserving density from the preimage volumes. */
   static isDual(which) { return which === 'hcdual' || which === 'hczdual' || which === 'hcldual'; }
@@ -302,7 +310,13 @@ export class Engine {
   /** True when the applied parameters P select the GPU path and it has not failed. */
   gpuActive(P) { return P.mode === 3 && !!P.gc && !!this.gpuDev && !this.gpuFailed && this.dim === 3; }
 
+  releaseEx2() {
+    if (this.ex2) { try { this.ex2.destroy(); } catch (e) { console.warn('[engine] GPU destroy:', e); } }
+    this.ex2 = null;
+  }
+
   releaseGpu() {
+    this.releaseEx2();
     for (const o of [this.sheetG, this.lpt]) if (o && o.destroy) { try { o.destroy(); } catch (e) { console.warn('[engine] GPU destroy:', e); } }
     if (this.g) { try { this.g.destroy(); } catch (e) { console.warn('[engine] GPU destroy:', e); } }
     const had = !!this.g || !!this.ref;
@@ -414,6 +428,24 @@ export class Engine {
         if (gen !== this.gen) return;
         this.seed(key, rho);
         this.gFresh.sheetp1 = key.join('|'); this.gFresh.sheet = null;
+      } else if (Engine.isExact(which)) {
+        // exact (clipped) deposit of the same tetrahedra; P1: vertex densities from the GPU Jacobian as for the P1 sheet
+        const p1 = which === 'sheetxp1';
+        const key = [which, P.D, P.order];
+        if (this.peek(key) !== undefined) return;
+        let st = null;
+        const rho = await this.timeAsync(p1 ? 'sheet exact P1 (tetra, GPU)' : 'sheet exact P0 (tetra, GPU)', async () => {
+          const disp = g.displacement(this.gGvals(P.D), order);
+          const w = p1 ? this.sheetG.vertexWeights(disp) : null;
+          const r = await g.readField(this.sheetG.densityExact(disp, w));
+          st = await this.sheetG.stats();
+          return r;
+        });
+        if (gen !== this.gen) return;
+        this.seed(key, rho);
+        this.exactInfo[which] = { path: 'GPU', skipped: st.skippedBox + st.skippedCap };
+        this.gFresh.sheetx = key.join('|'); this.gFresh.sheetxp1 = null;      // 'sheetx-rho' holds one of the two exact deposits
+        if (p1) { this.gFresh.sheetxp1 = key.join('|'); this.gFresh.sheetx = null; }
       } else if (Engine.isHc(which) && P.me === 1) {
         const src = this.hcSrcOf(which, P), tag = this.hcTag(P, src);
         const key = this.hcKey(P, src);
@@ -511,6 +543,7 @@ export class Engine {
       if (which === 'cic' && this.gFresh.cic === fkey) { buf = g.buf('rho'); offset = 1; }
       else if (which === 'sheet' && this.gFresh.sheet === fkey) { buf = g.buf('sheet-rho'); offset = 1; }
       else if (which === 'sheetp1' && this.gFresh.sheetp1 === fkey) { buf = g.buf('sheet-rho'); offset = 1; }
+      else if (Engine.isExact(which) && this.gFresh[which] === fkey) { buf = g.buf('sheetx-rho'); offset = 1; }
       else if (hcLike && this.gFresh.hc === fkey) buf = g.buf('hc-delta');
       else if (Engine.isDual(which) && this.gFresh.dual === fkey) { buf = g.buf('dual-rho'); offset = 1; }
       else buf = g.uploadField(this.delta(which, P));
@@ -525,6 +558,39 @@ export class Engine {
       this.seed(['fmap', ...fk], an.maps);
       this.seed(keyA, 1);
     } catch (err) { if (gen === this.gen) this.gpuFailure(err); }
+  }
+
+  /** True when the 2D exact deposit runs on the GPU (shared device present, not failed). */
+  gpu2dOn(P) { return P.mode === 2 && this.dim === 2 && !!this.gpuDev && !this.gpu2dFailed; }
+
+  /** 2D exact (clipped) triangle deposit on the GPU: positions and vertex densities from the WASM sim, density read back and cached. */
+  async _gpuExact2D(which, P) {
+    const key = [which, P.D, P.order];
+    if (this.peek(key) !== undefined || !this.gpu2dOn(P)) return;
+    const gen = this.gen, dev = this.gpuDev, p1 = which === 'sheetxp1';
+    try {
+      if (!this.ex2) this.ex2 = await new GpuExact2D(dev).init();
+      const ex = this.ex2, n = this.n;
+      const pos = this.positions(P);
+      const w = p1 ? this.vertexW(P) : null;
+      let st = null;
+      const rho = await this.timeAsync(p1 ? 'sheet exact P1 (GPU)' : 'sheet exact P0 (GPU)', async () => {
+        const up = (a) => { const b = dev.createBuffer({ size: Math.max(16, a.byteLength), usage: STORAGE_RW }); dev.queue.writeBuffer(b, 0, a); return b; };
+        const pb = up(pos), wb = w ? up(w) : null;
+        try {
+          const r = await readF32(dev, ex.density(pb, wb, n, { n }), n * n);
+          st = await ex.stats();
+          return r;
+        } finally { pb.destroy(); if (wb) wb.destroy(); }
+      });
+      if (gen !== this.gen) return;
+      this.seed(key, rho);
+      this.exactInfo[which] = { path: 'GPU', skipped: st.skippedBox };
+    } catch (err) {
+      console.warn('[engine] 2D exact deposit on the GPU failed, using WASM:', err);
+      this.gpu2dFailed = true;
+      this.releaseEx2();
+    }
   }
 
   gpuFailure(err) {
@@ -542,6 +608,7 @@ export class Engine {
    * `which` available in the cache.  A no-op on the WASM path, where the synchronous getters compute lazily.
    */
   async need(what, which, P) {
+    if (Engine.isExact(which) && this.gpu2dOn(P)) { await this.gpuSerial(() => this._gpuExact2D(which, P)); return; }     // 2D: field and spectra come from the CPU copy
     if (!this.gpuActive(P) || !this.g) return;
     if (what === 'field') await this.gpuSerial(() => this._gpuField(which, P));
     else if (what === 'analysis') await this.gpuSerial(() => this._gpuAnalysis(which, P));
@@ -571,6 +638,18 @@ export class Engine {
   sheetP1(P) {
     return this.memo(['sheetp1', P.D, P.order], () => { this.ensureWasm(P.order); return this.time(this.dim === 3 ? 'sheet P1 (tetra, CPU)' : 'sheet P1', () =>
       this.sim.sheet_density_p1(P.D, Math.min(P.order, this.wOrder), this.n, this.dim === 3 ? 1 : 2)); });
+  }
+  /**
+   * Exact (conservative) sheet deposit: every simplex is clipped against the cells it overlaps (r3d voxelization in the Rust core) and
+   * deposits the exact integral of its P0 (constant) or P1 (vertex-interpolated) density; cell-averaged rho/rhobar.  GPU paths seed the
+   * memo entries ('sheetx' / 'sheetxp1') beforehand; this is the WASM fallback (about 30 ms at 256^2, 2-3 s at 64^3).
+   */
+  sheetExact(P, p1) {
+    const which = p1 ? 'sheetxp1' : 'sheetx';
+    return this.memo([which, P.D, P.order], () => { this.ensureWasm(P.order); return this.time(`sheet exact ${p1 ? 'P1' : 'P0'} (${this.dim === 3 ? 'tetra, ' : ''}WASM)`, () => {
+      this.exactInfo[which] = { path: 'WASM', skipped: 0 };
+      return this.sim.sheet_density_exact(P.D, Math.min(P.order, this.wOrder), this.n, p1);
+    }); });
   }
   /** Vertex densities 1/|J(q)| (clamped at 1e4) on the Lagrangian grid [ix*n+iy] for the GPU P1 sheet view (2D). */
   vertexW(P) {
@@ -637,7 +716,7 @@ export class Engine {
   /** Parameter parts identifying a density-like field. */
   fieldKey(which, P) {
     switch (which) {
-      case 'sheet': case 'sheetp1': case 'cic': return [which, P.D, P.order];
+      case 'sheet': case 'sheetp1': case 'sheetx': case 'sheetxp1': case 'cic': return [which, P.D, P.order];
       case 'hc': case 'hcz': case 'hcl': return this.hcKey(P, this.hcSrcOf(which, P));
       case 'hcdual': case 'hczdual': case 'hcldual': return ['hcd', ...this.hcKey(P, this.hcSrcOf(which, P))];
       default: return ['lin', P.D];
@@ -649,7 +728,7 @@ export class Engine {
       if (Engine.isHc(which)) return this.hc(P, this.hcSrcOf(which, P)).delta;
       if (Engine.isDual(which)) { const r = this.dualRho(P, this.hcSrcOf(which, P)), o = new Float32Array(r.length); for (let i = 0; i < o.length; i++) o[i] = r[i] - 1; return o; }
       if (which === 'lin') return this.linear(P);
-      const rho = which === 'sheet' ? this.sheet(P) : which === 'sheetp1' ? this.sheetP1(P) : this.cic(P);
+      const rho = which === 'sheet' ? this.sheet(P) : which === 'sheetp1' ? this.sheetP1(P) : Engine.isExact(which) ? this.sheetExact(P, which === 'sheetxp1') : this.cic(P);
       const o = new Float32Array(rho.length);
       for (let i = 0; i < o.length; i++) o[i] = rho[i] - 1;
       return o;

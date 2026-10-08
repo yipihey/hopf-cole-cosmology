@@ -6,11 +6,13 @@ import { renderColorbar, COLORMAPS } from '../viz/colormaps.js';
 import { slider, checkbox } from '../viz/ui.js';
 import { slice3D } from '../hcc.js';
 import { el, sel } from './dom.js';
+import { Engine } from './engine.js';
+import { exactNote } from './catalog.js';
 
 const CMAPS = Object.keys(COLORMAPS).map((c) => [c, c]);
-const FIELDS = [['cic', 'CIC density'], ['sheet', 'Sheet density (tetrahedra)'], ['sheetp1', 'Sheet density (P1, vertex-interpolated)'], ['hc', 'Hopf–Cole density'], ['hcdual', 'Hopf–Cole dual sheet (mass-conserving)'], ['lin', 'Linear density 1+Dδ0']];
+const FIELDS = [['cic', 'CIC density'], ['sheet', 'Sheet density (tetrahedra)'], ['sheetp1', 'Sheet density (P1, vertex-interpolated)'], ['sheetx', 'Sheet density (exact P0)'], ['sheetxp1', 'Sheet density (exact P1)'], ['hc', 'Hopf–Cole density'], ['hcdual', 'Hopf–Cole dual sheet (mass-conserving)'], ['lin', 'Linear density 1+Dδ0']];
 const DUAL_NOTE = ' The mass of a cell is the Lagrangian volume of its preimage under the Hopf–Cole inverse map (the hexahedron spanned by q at its eight corners, six Kuhn tetrahedra), so mass is conserved exactly and peaks are not under-resolved by finite differences; before shell crossing it should beat the finite-difference Hopf–Cole density in peaks and the forward sheet in voids.';
-const FNAME = { cic: 'CIC density', sheet: 'tetrahedral sheet density (Kuhn simplices, point-sampled)', sheetp1: 'P1 sheet density (tetrahedra, linear vertex-interpolated shape, mass-conserving)', hc: 'Hopf–Cole density 1+δ', hcdual: 'Hopf–Cole dual sheet density (mass-conserving)', lin: 'linear density 1+Dδ0 (clipped at 10⁻³)' };
+const FNAME = { cic: 'CIC density', sheet: 'tetrahedral sheet density (Kuhn simplices, point-sampled)', sheetp1: 'P1 sheet density (tetrahedra, linear vertex-interpolated shape, mass-conserving)', sheetx: 'exact tetrahedral sheet density (P0: constant per simplex, clipped against the cells)', sheetxp1: 'exact tetrahedral sheet density (P1: linear vertex-interpolated shape, clipped against the cells)', hc: 'Hopf–Cole density 1+δ', hcdual: 'Hopf–Cole dual sheet density (mass-conserving)', lin: 'linear density 1+Dδ0 (clipped at 10⁻³)' };
 
 export class Fields3D {
   constructor(app, host) {
@@ -122,7 +124,7 @@ export class Fields3D {
     const dep = this.dependsOnHc();
     const t = [
       { label: 'volume', heavy: !warm, fn: () => this.updateVolume(P), hc: dep.vol },
-      { label: 'slice', heavy: (S.s1 === 'sheet' || S.s1 === 'sheetp1') && !warm, fn: () => this.updateSlice(P), hc: dep.slice },
+      { label: 'slice', heavy: (S.s1 === 'sheet' || S.s1 === 'sheetp1' || S.s1 === 'sheetx' || S.s1 === 'sheetxp1') && !warm, fn: () => this.updateSlice(P), hc: dep.slice },
       { label: 'Fourier amplitude', heavy: !warm, fn: () => this.updateFourier(2, P), hc: dep.fourier },
       { label: 'Fourier phase', heavy: false, fn: () => this.updateFourier(3, P), hc: dep.fourier },
     ];
@@ -167,6 +169,7 @@ export class Fields3D {
     this.capV.textContent = `${FNAME[S.v1]}: ${S.vm === 'mip' ? 'maximum-intensity projection' : 'emission-absorption ray marching'} through the ${eng.n}³ box.`
       + (S.v1 === 'sheetp1' ? ' The density inside each tetrahedron varies linearly between the vertex values 1/|J| (barycentric interpolation, rescaled so every simplex still deposits exactly its mass)' + (eng.lastPath === 'GPU' && eng.gpuActive(P) ? '; GPU: the vertex densities come from a finite-difference Jacobian of the displacement.' : '; WASM (GPU compute off): about 1 s at 64³.') : '')
       + (S.v1 === 'sheet' ? (eng.lastPath === 'GPU' && eng.gpuActive(P) ? ' GPU: one thread per Lagrangian cell, six Kuhn tetrahedra, watertight point-in-tetrahedron tests, 18-bit fixed-point atomics.' : ` WASM (GPU compute off): about 1 s at 64³, 4 s at 96³${eng.n >= 128 ? '; at 128³ this takes tens of seconds, prefer CIC or Hopf–Cole' : ''}.`) : '')
+      + (Engine.isExact(S.v1) ? ' Every simplex is clipped against the cells it overlaps and deposits the exact integral of its density profile; no sampling noise, mass conserved to roundoff.' + (S.v1 === 'sheetxp1' ? ' P1: the vertex densities 1/|J| are interpolated linearly inside each tetrahedron.' : '') + exactNote(eng, S.v1) + (eng.lastPath !== 'GPU' || !eng.gpuActive(P) ? ' WASM (GPU compute off): about 1 s at 32³, 2–3 s at 64³.' : '') : '')
       + (S.v1 === 'hcdual' ? DUAL_NOTE : '')
       + (gpuCic ? ' GPU CIC deposits 18-bit fixed-point weights with integer atomics (mass conserved exactly); a cell would overflow at ρ/ρ̄ ≥ 16384.' : '');
     this.drawVolume();
@@ -200,7 +203,7 @@ export class Fields3D {
     const r = this.fvS.getRange();
     renderColorbar(this.barS, S.c2, r.vmin, r.vmax, { label: 'ρ/ρ̄', log: r.log });
     const ax = ['x', 'y', 'z'][S.sa], hv = [['y', 'z'], ['x', 'z'], ['x', 'y']][S.sa];
-    this.capS.textContent = `${FNAME[S.s1]} on the plane ${ax} = ${idx} of ${n} (${hv[0]} horizontal, ${hv[1]} vertical).` + (S.s1 === 'hcdual' ? DUAL_NOTE : '');
+    this.capS.textContent = `${FNAME[S.s1]} on the plane ${ax} = ${idx} of ${n} (${hv[0]} horizontal, ${hv[1]} vertical).` + (S.s1 === 'hcdual' ? DUAL_NOTE : '') + (Engine.isExact(S.s1) ? ' Every simplex is clipped against the cells it overlaps and deposits the exact integral of its density profile; no sampling noise, mass conserved to roundoff.' : '');
     this.ps.root.classList.remove('is-stale');
   }
   updateSliceRange() { if (this.app.S.same && this.fvS && this.fvS.data) this.updateSlice(); }
@@ -226,7 +229,7 @@ export class Fields3D {
     fv.draw();
     const r = fv.getRange();
     renderColorbar(this['barF' + slot], cmap, r.vmin, r.vmax, { label: abs ? 'log₁₀|δ̂|/max' : 'arg δ̂ [rad]' });
-    const what = { cic: 'CIC', sheet: 'sheet', sheetp1: 'P1 sheet', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' }[S.fo];
+    const what = { cic: 'CIC', sheet: 'sheet', sheetp1: 'P1 sheet', sheetx: 'exact P0 sheet', sheetxp1: 'exact P1 sheet', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' }[S.fo];
     this['capF' + slot].textContent = abs
       ? `log₁₀|δ̂(k)|/max of the ${what} density in the k_z = 0 plane (k_x horizontal, k_y vertical, k = 0 at the centre).`
       : `Phase of δ̂(k) of the ${what} density in the k_z = 0 plane. Mode coupling correlates the phases of generated modes with those of their parents.`;
