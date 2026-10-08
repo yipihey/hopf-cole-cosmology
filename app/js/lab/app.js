@@ -568,6 +568,22 @@ export class Lab {
 
   runSpectra() { if (this.eng.sim && this.eng.dim === this.S.mode && this.visible('s')) this.runSection('s'); }
 
+  /** The direct spectra's modes-per-bin slider changed: recompute those series (the other results are cached). */
+  modesChanged() { this.P.dm = this.S.dm; this.runSpectra(); }
+
+  /** The NUFFT refine select changed: every visible section that can show the NUFFT density is refreshed in ONE task chain. */
+  async refineChanged() {
+    if (!this.eng.sim || this.eng.dim !== this.S.mode) return;
+    this.P.rf = this.S.rf;
+    const P = this.P, gen = this.runGen, tasks = [];
+    if (this.visible('f')) tasks.push(...this.fields.tasks(P));
+    if (this.visible('s')) tasks.push(...this.spectra.tasks(P));
+    if (this.visible('l')) tasks.push(...this.legendre.tasks(P));
+    if (this.visible('p')) tasks.push(...this.pdfs.tasks(P));
+    await this.runTasks(tasks, gen);
+    if (gen === this.runGen) { if (this.lastError) this.setStatus(this.lastError, 'err'); else this.setStatus('ready'); this.showTimings(); }
+  }
+
   /** Re-render one field panel from cache (display-only change). */
   async runPanel(owner, idx) {
     if (!this.eng.sim || this.eng.dim !== this.fieldsMode) return;

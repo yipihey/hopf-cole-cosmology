@@ -11,6 +11,7 @@ import { GpuLpt3D } from './lpt3d.js';
 import { GpuSheet3D } from './sheet3d.js';
 import { GpuExact2D, exactFixtures2D } from './exact2d.js';
 import { exactFixtures3D } from './exact3d.js';
+import { GpuDirectSpectrum, sampleModes, binTransform, directTransformRef, directTransformQuad } from './direct.js';
 
 const out = document.getElementById('out');
 const tbl = document.getElementById('tbl');
@@ -712,7 +713,156 @@ async function benchExact(core, gpu, dim, n, { wasm = true } = {}) {
   return R;
 }
 
-export async function runAll({ val = [32, 64], ben = [64, 128], lval = [32, 64], lben = [64, 128], wasmOrder128 = 4, skipOld = false, onlyExact = false, noExact = false, exFix = true, exVal3 = [32, 64], exVal2 = [128, 256], exBench2 = [256, 512], exBench3 = [64, 128] } = {}) {
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// direct (deposit-free) sheet spectrum: GPU divided-difference kernel vs the f64 JS port and vs WASM direct_spectrum
+
+/** worst per-mode error |g - r| / rms(|r|) of the mode's bin (the tail modes are tiny next to the low-k ones, so the scale is the bin's own) */
+function modeErr(sm, g, r) {
+  const nb = sm.nbins, s2 = new Float64Array(nb), c = new Float64Array(nb);
+  for (let i = 0; i < sm.nm; i++) { s2[sm.bin[i]] += r[2 * i] ** 2 + r[2 * i + 1] ** 2; c[sm.bin[i]]++; }
+  let worst = 0, at = -1;
+  for (let i = 0; i < sm.nm; i++) {
+    const b = sm.bin[i], sc = Math.sqrt(s2[b] / c[b]);
+    const e = Math.hypot(g[2 * i] - r[2 * i], g[2 * i + 1] - r[2 * i + 1]) / sc;
+    if (e > worst) { worst = e; at = i; }
+  }
+  return { worst, at };
+}
+
+/** per-mode check of the GPU kernel against the f64 JS reference on a small WASM sheet (2D: 32^2, 3D: 16^3), P0 and P1, before and after shell crossing */
+async function validateDirectModes(core, gpu, dim, n) {
+  const { device } = gpu;
+  const tag = `direct ${dim === 2 ? n + '^2' : n + '^3'}`;
+  const order = 2;
+  log(`--- direct spectrum, per-mode check vs the f64 JS reference, ${dim}D n = ${n}`);
+  const sim = new core.CosmoSim(dim, n, 1);
+  sim.set_ic_gaussian(0, -1, 0, 0.05, 1, 1);
+  sim.build_lpt(order);
+  const dsc = sim.shell_crossing(order);
+  const ds = await new GpuDirectSpectrum(device).init();
+  const sm = sampleModes(dim, n, dim === 2 ? 9 : 8, dim === 2 ? 14 : 7, 3);
+  log(`${sm.nm} modes in ${sm.nbins} bins (enumerated bins: ${sm.enumerated.map((e, i) => (e ? i : -1)).filter((i) => i >= 0).join(',') || 'none'}); D_sc = ${dsc.toFixed(3)}`);
+  for (const D of [0.5 * dsc, 1.5 * dsc].map((x) => +x.toPrecision(3))) {
+    const pos = sim.positions(D, order), w = sim.vertex_density(D, order);
+    const pb = upload(device, pos), wb = upload(device, w);
+    for (const p1 of [false, true]) {
+      const g = await ds.transform({ dim, n, pos: pb, w: p1 ? wb : null, p1, modes: sm.modes });
+      const t0 = performance.now();
+      const r = directTransformRef(dim, n, pos, p1 ? w : null, p1, sm.modes);
+      const tref = performance.now() - t0;
+      const { worst, at } = modeErr(sm, g.delta, r);
+      const bg = binTransform(sm, g.delta), br = binTransform(sm, r);
+      let pe = 0; for (let i = 0; i < bg.p.length; i++) pe = Math.max(pe, Math.abs(bg.p[i] - br.p[i]) / br.p[i]);
+      const nm = `${p1 ? 'P1' : 'P0'} D=${D}${D > dsc ? ' (multi-stream)' : ''}`;
+      record(tag, `${nm}: max per-mode |d_gpu - d_ref| / rms|d_ref|(bin)  (worst mode ${at}, |k|=${at >= 0 ? sm.kk[at].toFixed(1) : '-'}; GPU ${g.ms.toFixed(0)} ms, JS f64 ${tref.toFixed(0)} ms)`, worst, 1e-3);
+      record(tag, `${nm}: max binned P relative error`, pe, 1e-3);
+    }
+    pb.destroy(); wb.destroy();
+  }
+  ds.destroy(); sim.free();
+}
+
+/** GPU kernel (and the f64 port of the Rust divided differences) against tensor Gauss-Legendre quadrature of the Hermite-Genocchi integral on a tiny sheet */
+async function validateDirectQuad(core, gpu, dim, n) {
+  const { device } = gpu;
+  const tag = `direct ${dim === 2 ? n + '^2' : n + '^3'} quad`;
+  const order = 2;
+  log(`--- direct spectrum vs Gauss-Legendre quadrature of the simplex integrals, ${dim}D n = ${n}`);
+  const sim = new core.CosmoSim(dim, n, 1);
+  sim.set_ic_gaussian(0, -1, 0, 0.05, 1, 1);
+  sim.build_lpt(order);
+  const dsc = sim.shell_crossing(order);
+  const ds = await new GpuDirectSpectrum(device).init();
+  const sm = sampleModes(dim, n, dim === 2 ? 8 : 6, dim === 2 ? 8 : 5, 5);
+  const ngl = dim === 2 ? 32 : 16;
+  const D = +(0.5 * dsc).toPrecision(3);
+  const pos = sim.positions(D, order), w = sim.vertex_density(D, order);
+  const pb = upload(device, pos), wb = upload(device, w);
+  for (const p1 of [false, true]) {
+    const t0 = performance.now();
+    const q = directTransformQuad(dim, n, pos, p1 ? w : null, p1, sm.modes, ngl);
+    const tq = performance.now() - t0;
+    const g = await ds.transform({ dim, n, pos: pb, w: p1 ? wb : null, p1, modes: sm.modes });
+    const r = directTransformRef(dim, n, pos, p1 ? w : null, p1, sm.modes);
+    const eg = modeErr(sm, g.delta, q), er = modeErr(sm, r, q);
+    log(`${p1 ? 'P1' : 'P0'} D=${D}: ${sm.nm} modes, quadrature ${tq.toFixed(0)} ms (${ngl}^${dim} points); f64 port of the Rust divided differences vs quadrature: ${er.worst.toExponential(2)} (worst |k| = ${sm.kk[er.at].toFixed(1)})`);
+    record(tag, `${p1 ? 'P1' : 'P0'} D=${D}: GPU vs quadrature, max per-mode error / rms|d|(bin)  (worst mode |k| = ${eg.at >= 0 ? sm.kk[eg.at].toFixed(1) : '-'})`, eg.worst, 1e-3);
+  }
+  pb.destroy(); wb.destroy(); ds.destroy(); sim.free();
+}
+
+/** binned direct spectra against WASM direct_spectrum with the SAME lattice modes (the JS mode sampler replicates the Rust SplitMix/xoshiro stream) */
+async function validateDirectWasm(core, gpu, n) {
+  const { device } = gpu;
+  const tag = `direct ${n}^2 vs WASM`;
+  const order = 2, nbins = 12, perBin = 64, seed = 7;
+  log(`--- direct spectrum vs WASM direct_spectrum, 2D n = ${n}, ${nbins} bins x ${perBin} modes`);
+  const sim = new core.CosmoSim(2, n, 1);
+  sim.set_ic_gaussian(0, -1, 0, 0.05, 1, 1);
+  sim.build_lpt(order);
+  const dsc = sim.shell_crossing(order);
+  const ds = await new GpuDirectSpectrum(device).init();
+  const sm = sampleModes(2, n, nbins, perBin, seed);
+  for (const D of [0.5 * dsc, 1.5 * dsc].map((x) => +x.toPrecision(3))) {
+    const pb = upload(device, sim.positions(D, order)), wb = upload(device, sim.vertex_density(D, order));
+    for (const p1 of [false, true]) {
+      const t0 = performance.now();
+      const wf = sim.direct_spectrum(D, order, p1, nbins, perBin, seed);
+      const tw = performance.now() - t0;
+      const wsp = unpack(wf);
+      const g = await ds.spectrum({ dim: 2, n, pos: pb, w: p1 ? wb : null, p1, nbins, perBin, seed, sm });
+      const nm = `${p1 ? 'P1' : 'P0'} D=${D}${D > dsc ? ' (multi-stream)' : ''}`;
+      let dn = g.k.length === wsp.k.length ? 0 : Infinity, dk = 0, peE = 0, peS = 0;
+      const bins = binTransform(sm, new Float32Array(2 * sm.nm)).bin;     // ids of the non-empty bins, in order
+      for (let i = 0; i < wsp.k.length && i < g.k.length; i++) {
+        dn = Math.max(dn, Math.abs(g.n[i] - wsp.n[i])); dk = Math.max(dk, Math.abs(g.k[i] - wsp.k[i]) / wsp.k[i]);
+        const e = Math.abs(g.p[i] - wsp.p[i]) / wsp.p[i];
+        if (sm.enumerated[bins[i]]) peE = Math.max(peE, e); else peS = Math.max(peS, e);
+      }
+      record(tag, `${nm}: mode sets identical (max |N_gpu - N_wasm|, max rel |k| difference)`, Math.max(dn, dk * 1e9), 0.5, (v) => v.toExponential(1));
+      record(tag, `${nm}: fully enumerated low-k bins, max rel P error  (WASM ${tw.toFixed(0)} ms, GPU ${g.ms.toFixed(1)} ms)`, peE, 1e-3);
+      record(tag, `${nm}: sampled bins (same modes), max rel P error`, peS, 2e-2);
+    }
+    pb.destroy(); wb.destroy();
+  }
+  ds.destroy(); sim.free();
+}
+
+/** timings of the direct spectrum on the GPU (positions from WASM at order 1), 20 bins x 128 modes */
+async function benchDirect(core, gpu, dim, n) {
+  const { device } = gpu;
+  log(`--- direct spectrum benchmark ${dim}D n = ${n}, 20 bins x 128 modes`);
+  const sim = new core.CosmoSim(dim, n, 1);
+  sim.set_ic_gaussian(0, -1, 0, 0.05, 1, 1);
+  sim.build_lpt(1);
+  const dsc = sim.shell_crossing(1);
+  const ds = await new GpuDirectSpectrum(device).init();
+  const sm = sampleModes(dim, n, 20, 128, 1);
+  const R = { dim, n, modes: sm.nm, dsc };
+  for (const [name, D] of [['pre', 0.5 * dsc], ['post', 1.5 * dsc]]) {
+    const pb = upload(device, sim.positions(D, 1)), wb = upload(device, sim.vertex_density(D, 1));
+    for (const p1 of [false, true]) {
+      // pipeline warm-up on a few modes, then the median of 3 timed runs (a single run when one takes tens of seconds)
+      await ds.transform({ dim, n, pos: pb, w: p1 ? wb : null, p1, modes: sm.modes.subarray(0, 4 * 8) });
+      const ts = [];
+      let last = null;
+      for (let rep = 0; rep < 3; rep++) {
+        last = await ds.transform({ dim, n, pos: pb, w: p1 ? wb : null, p1, modes: sm.modes }); ts.push(last.ms);
+        if (last.ms > 8000) break;
+      }
+      ts.sort((a, b) => a - b);
+      R[`${p1 ? 'p1' : 'p0'}_${name}_ms`] = ts[Math.floor(ts.length / 2)];
+      R.chunks = last.chunks; R.batches = last.batches;
+    }
+    pb.destroy(); wb.destroy();
+  }
+  log(JSON.stringify(R, (k, v) => (typeof v === 'number' ? +v.toPrecision(4) : v)));
+  ds.destroy(); sim.free();
+  return R;
+}
+
+export async function runAll({ val = [32, 64], ben = [64, 128], lval = [32, 64], lben = [64, 128], wasmOrder128 = 4, skipOld = false, onlyExact = false, noExact = false, exFix = true, exVal3 = [32, 64], exVal2 = [128, 256], exBench2 = [256, 512], exBench3 = [64, 128], noDirect = false, onlyDirect = false, dirVal2 = [32], dirVal3 = [16], dirQuad2 = [16], dirQuad3 = [8], dirWasm = [64], dirBench2 = [256, 512], dirBench3 = [64, 128] } = {}) {
   const res = { rows, bench: [], lbench: [], error: null };
   window.__gpuTest = res;
   try {
@@ -720,6 +870,21 @@ export async function runAll({ val = [32, 64], ben = [64, 128], lval = [32, 64],
     const gpu = await getGPU();
     if (!gpu) { log('WebGPU not available'); res.error = 'no webgpu'; return res; }
     log(`adapter limits: maxStorageBufferBindingSize ${(gpu.device.limits.maxStorageBufferBindingSize / 1048576)} MiB, maxBufferSize ${(gpu.device.limits.maxBufferSize / 1048576)} MiB`);
+    if (!noDirect) {
+      for (const n of dirVal2) await validateDirectModes(core, gpu, 2, n);
+      for (const n of dirVal3) await validateDirectModes(core, gpu, 3, n);
+      for (const n of dirQuad2) await validateDirectQuad(core, gpu, 2, n);
+      for (const n of dirQuad3) await validateDirectQuad(core, gpu, 3, n);
+      for (const n of dirWasm) await validateDirectWasm(core, gpu, n);
+      for (const n of dirBench2) res.dirBench2 = [...(res.dirBench2 || []), await benchDirect(core, gpu, 2, n)];
+      for (const n of dirBench3) res.dirBench3 = [...(res.dirBench3 || []), await benchDirect(core, gpu, 3, n)];
+    }
+    if (onlyDirect) {
+      const fails = rows.filter((r) => !r.pass).length;
+      log(fails ? `FAILED: ${fails} of ${rows.length}` : `ALL ${rows.length} CHECKS PASSED`);
+      res.fails = fails; res.done = true;
+      return res;
+    }
     if (!noExact) {
       if (exFix) await validateExactFixtures(gpu);
     }
@@ -758,6 +923,6 @@ export async function runAll({ val = [32, 64], ben = [64, 128], lval = [32, 64],
 
 const q = new URLSearchParams(location.search);
 const list = (k, d) => (q.has(k) ? q.get(k).split(',').filter(Boolean).map(Number) : d);
-const opts = () => ({ val: list('val', [32, 64]), ben: list('bench', [64, 128]), lval: list('lval', [32, 64]), lben: list('lbench', [64, 128]), wasmOrder128: list('wo128', [4])[0], skipOld: q.has('skipold'), onlyExact: q.has('onlyexact'), noExact: q.has('noexact'), exFix: !q.has('nofix'), exVal3: list('exval3', [32, 64]), exVal2: list('exval2', [128, 256]), exBench2: list('exbench2', [256, 512]), exBench3: list('exbench3', [64, 128]) });
+const opts = () => ({ val: list('val', [32, 64]), ben: list('bench', [64, 128]), lval: list('lval', [32, 64]), lben: list('lbench', [64, 128]), wasmOrder128: list('wo128', [4])[0], skipOld: q.has('skipold'), onlyExact: q.has('onlyexact'), noExact: q.has('noexact'), exFix: !q.has('nofix'), exVal3: list('exval3', [32, 64]), exVal2: list('exval2', [128, 256]), exBench2: list('exbench2', [256, 512]), exBench3: list('exbench3', [64, 128]), noDirect: q.has('nodirect'), onlyDirect: q.has('onlydirect'), dirVal2: list('dval2', [32]), dirVal3: list('dval3', [16]), dirQuad2: list('dquad2', [16]), dirQuad3: list('dquad3', [8]), dirWasm: list('dwasm', [64]), dirBench2: list('dbench2', [256, 512]), dirBench3: list('dbench3', [64, 128]) });
 document.getElementById('run').addEventListener('click', () => runAll(opts()));
 if (q.has('auto')) runAll(opts());

@@ -149,3 +149,7 @@ html { color-scheme: light dark; }
 .lab-pdf-name { display: flex; align-items: center; gap: 0.35rem; }
 .lab-pdf-swatch { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 2px; flex: 0 0 auto; }
 .lab-pdf-general { margin: 0.5rem 0 0; max-width: 62rem; line-height: 1.4; }
+
+/* direct sheet spectra and NUFFT density */
+.lab-dirinfo { font-variant-numeric: tabular-nums; }
+.lab-checks .hcc-select select { max-width: 8rem; }

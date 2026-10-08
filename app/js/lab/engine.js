@@ -8,12 +8,14 @@ import { GpuCosmo3D } from '../gpu/cosmo3d.js';
 import { GpuLpt3D } from '../gpu/lpt3d.js';
 import { GpuSheet3D } from '../gpu/sheet3d.js';
 import { GpuExact2D } from '../gpu/exact2d.js';
+import { GpuDirectSpectrum, sampleModes } from '../gpu/direct.js';
 import { STORAGE_RW, readF32 } from '../gpu/util.js';
 import { getUnmergedSpec } from '../gpu/terms.js';
 import { gpu3dRefusal } from './perf.js';
 import { ENV } from './state.js';
 
 const MAX_CACHE_BYTES = 420e6;
+const DIRECT_MAX_SEC = 60;          // the direct-spectrum kernel is not launched when its estimated GPU time exceeds this (3D P1 at 128^3 takes minutes)
 
 function sizeOf(v) {
   if (v == null) return 0;
@@ -45,6 +47,9 @@ export class Engine {
     this.sheetG = null;           // GpuSheet3D: tetrahedral sheet density
     this.ex2 = null;              // GpuExact2D: exact (clipped) triangle deposit of the 2D lab
     this.gpu2dFailed = false;     // the 2D exact deposit failed on the GPU: WASM from now on (until the device changes)
+    this.dsp = null;              // GpuDirectSpectrum: deposit-free sheet spectra (divided differences of the exponential over the simplices)
+    this.dspFailed = false;       // the direct-spectrum kernel failed: WASM fallback (small grids only) until the device changes
+    this.directInfo = {};         // 'dir0' | 'dir1' -> {path, ms, nmodes, perBin} of the last direct spectrum (for the notes)
     this.exactInfo = {};          // field name -> {path, skipped} of the last exact deposit (for the captions)
     this.gTerms = null;           // {order, count} of the GPU-built raw LPT terms
     this.hsim = null;             // 8^3 helper CosmoSim: term list and growth functions g_tau(D) (grid independent), see ensureGrowth()
@@ -117,6 +122,8 @@ export class Engine {
   }
   /** The exact (clipping-based) sheet deposits: 'sheetx' = P0 (constant per simplex), 'sheetxp1' = P1 (vertex-interpolated). */
   static isExact(which) { return which === 'sheetx' || which === 'sheetxp1'; }
+  /** The NUFFT density: the Lagrangian trapezoidal integral of the Fourier-refined map (WASM type-1 NUFFT), see nufft(). */
+  static isNufft(which) { return which === 'nufft'; }
   static isHc(which) { return which === 'hc' || which === 'hcz' || which === 'hcl'; }
   /** The 'dual sheet' variants of the Hopf-Cole fields: the same inverse map q(x), mass-conserving density from the preimage volumes. */
   static isDual(which) { return which === 'hcdual' || which === 'hczdual' || which === 'hcldual'; }
@@ -313,6 +320,8 @@ export class Engine {
   releaseEx2() {
     if (this.ex2) { try { this.ex2.destroy(); } catch (e) { console.warn('[engine] GPU destroy:', e); } }
     this.ex2 = null;
+    if (this.dsp) { try { this.dsp.destroy(); } catch (e) { console.warn('[engine] GPU destroy:', e); } }
+    this.dsp = null;
   }
 
   releaseGpu() {
@@ -655,6 +664,116 @@ export class Engine {
   vertexW(P) {
     return this.memo(['vweights', P.D, P.order], () => { this.ensureWasm(P.order); return this.time('vertex densities', () => this.sim.vertex_density(P.D, Math.min(P.order, this.wOrder))); });
   }
+  /**
+   * Availability of the NUFFT density for the applied parameters: {ok, note}.  2D: any grid with n x refine <= 1024 (about 4 s of WASM at
+   * the limit); 3D: n <= 64 and refine <= 2 (several seconds in WASM, the fine grid has (n x refine)^3 points).
+   */
+  nufftInfo(P) {
+    const r = P.rf || 2;
+    if (P.mode === 3 && (P.n > 64 || r > 2)) return { ok: false, note: `NUFFT density is available in 3D only up to 64³ with refine ≤ 2 (the fine grid has (n·refine)³ = ${(P.n * r) ** 3 >= 1e9 ? ((P.n * r) ** 3 / 1e9).toFixed(1) + ' G' : (((P.n * r) ** 3) / 1e6).toFixed(0) + ' M'} points); choose a smaller grid or refine.` };
+    if (P.mode === 2 && P.n * r > 1024) return { ok: false, note: `NUFFT density is limited to n × refine ≤ 1024 in 2D (here ${P.n * r}: the fine grid would have ${((P.n * r) ** 2 / 1e6).toFixed(1)} M points); lower the refine factor.` };
+    return { ok: true, note: '' };
+  }
+  /**
+   * NUFFT density rho/rhobar of the Fourier-refined map x(q) = q + Psi_refined(q) on the lab grid (WASM, core/src/direct.rs::nufft_density):
+   * the Lagrangian trapezoidal rule over the (n refine)^d fine grid evaluated through a type-1 NUFFT.  Needs the WASM LPT (built on demand).
+   */
+  nufft(P) {
+    return this.memo(['nufft', P.D, P.order, P.rf], () => {
+      const info = this.nufftInfo(P);
+      if (!info.ok) throw new Error(info.note);
+      this.ensureWasm(P.order);
+      return this.time(`NUFFT density (refine ${P.rf}, WASM)`, () => this.sim.nufft_density(P.D, Math.min(P.order, this.wOrder), P.rf, this.n));
+    });
+  }
+
+  // -- direct (deposit-free) sheet spectra ----------------------------------------------------------------------------------------
+  /** Lattice modes per bin (cached per grid, bins and modes per bin; the fixed seed keeps the spectrum steady while D changes). */
+  directModes(P) {
+    return this.memo(['dmodes', this.dim, this.n, this.nbins, P.dm], () => this.time('direct: mode sampling', () => sampleModes(this.dim, this.n, this.nbins, P.dm, 1)));
+  }
+  directKey(p1, P) { return ['direct', p1 ? 1 : 0, P.D, P.order, this.nbins, P.dm]; }
+  /** Plan of the WASM fallback (no WebGPU): modes per bin reduced so that it stays below ~6 s; ok = false when the grid is too big. */
+  directWasmPlan(p1, P) {
+    const dim = P.mode, n = P.n, nbins = NBINS[dim];
+    const nsimp = dim === 2 ? 2 * n * n : 6 * n * n * n;
+    const rate = dim === 2 ? (p1 ? 6e5 : 1e7) : (p1 ? 1.5e5 : 3e6);     // simplex x mode evaluations per second in the Rust core (measured: 64^2 and 32^3)
+    const perBin = Math.min(P.dm, Math.floor(6 * rate / (nsimp * nbins)));
+    const sec = nsimp * nbins * Math.max(perBin, 0) / rate;
+    return { ok: n <= 64 && perBin >= 4, perBin, sec };
+  }
+  /** Rough GPU time (s) of the direct spectrum kernel on a mid-range GPU: simplex x mode evaluations / measured rate (Apple M-class: 2D 7e9/s P0, 7e8/s P1; 3D 2.5e9/s P0, 4e8/s P1). */
+  directGpuSeconds(p1, P) {
+    const dim = P.mode, n = P.n, nsimp = dim === 2 ? 2 * n * n : 6 * n * n * n;
+    const nm = NBINS[dim] * P.dm * 0.85;
+    const rate = dim === 2 ? (p1 ? 7e8 : 7e9) : (p1 ? 4e8 : 2.5e9);
+    return nsimp * nm / rate;
+  }
+  /** Why the direct spectrum is not shown (empty string if it is available). */
+  directNote(p1, P) {
+    const tag = `direct sheet spectrum (${p1 ? 'P1' : 'P0'})`;
+    if (this.directGpuPossible(P)) {
+      const sec = this.directGpuSeconds(p1, P);
+      return sec > DIRECT_MAX_SEC ? `${tag} is not computed: ${P.mode}D ${P.n}${P.mode === 2 ? '²' : '³'} with ${P.dm} modes per bin would take about ${Math.round(sec)} s on the GPU; lower "modes / bin" or the grid size.` : '';
+    }
+    const pl = this.directWasmPlan(p1, P);
+    if (pl.ok) return '';
+    return `${tag} needs the GPU kernel for this grid: the WASM fallback is limited to n ≤ 64 and about 6 s (here ${P.mode}D ${P.n}${P.mode === 2 ? '²' : '³'}); ${this.gpuDev ? 'the GPU compute path is off or failed' : 'WebGPU is not available'}.`;
+  }
+  directGpuPossible(P) {
+    if (!this.gpuDev || this.dspFailed) return false;
+    if (P.mode === 2) return true;
+    return this.gpuActive(P) && !!this.g && !!this.gTerms;       // 3D: positions come from the GPU LPT
+  }
+  /** Direct spectrum {k, p, n} of the cached run (GPU result, or the WASM fallback on small grids); null when unavailable. */
+  directPk(p1, P) {
+    const key = this.directKey(p1, P);
+    const v = this.peek(key);
+    if (v) return v;
+    const pl = this.directWasmPlan(p1, P);
+    if (this.directGpuPossible(P) || !pl.ok) return null;       // the GPU result is seeded by needDirect (or refused, see directNote)
+    return this.memo(key, () => this.time(`direct spectrum ${p1 ? 'P1' : 'P0'} (WASM)`, () => {
+      this.ensureWasm(P.order);
+      const t0 = performance.now();
+      const r = unpackSpectrum(this.sim.direct_spectrum(P.D, Math.min(P.order, this.wOrder), p1, this.nbins, pl.perBin, 1));
+      this.directInfo[p1 ? 'dir1' : 'dir0'] = { path: 'WASM', ms: performance.now() - t0, nmodes: r.n.reduce((a, b) => a + b, 0), perBin: pl.perBin };
+      return r;
+    }));
+  }
+  /** Run the GPU direct-spectrum kernel (2D: positions from the WASM sim; 3D: the GPU positions) and seed the cache. No-op when unavailable. */
+  needDirect(p1, P) {
+    if (!this.directGpuPossible(P) || this.directGpuSeconds(p1, P) > DIRECT_MAX_SEC || this.peek(this.directKey(p1, P)) !== undefined) return Promise.resolve();
+    return this.gpuSerial(() => this._gpuDirect(p1, P));
+  }
+  async _gpuDirect(p1, P) {
+    const key = this.directKey(p1, P);
+    if (this.peek(key) !== undefined || !this.directGpuPossible(P)) return;
+    const gen = this.gen, dev = this.gpuDev, n = this.n, dim = this.dim, label = `direct spectrum ${p1 ? 'P1' : 'P0'} (GPU)`;
+    const temp = [];
+    try {
+      if (!this.dsp) this.dsp = await new GpuDirectSpectrum(dev).init();
+      const up = (a) => { const b = dev.createBuffer({ size: Math.max(16, a.byteLength), usage: STORAGE_RW }); dev.queue.writeBuffer(b, 0, a); temp.push(b); return b; };
+      const sm = this.directModes(P);
+      let pos, w = null;
+      if (dim === 3) {
+        const g = this.g, order = Math.min(P.order, this.gTerms.order);
+        pos = g.positions(this.gGvals(P.D), order);
+        if (p1) w = this.sheetG.vertexWeights(g.displacement(this.gGvals(P.D), order));
+      } else {
+        pos = up(this.positions(P));
+        if (p1) w = up(this.vertexW(P));
+      }
+      const r = await this.timeAsync(label, () => this.dsp.spectrum({ dim, n, pos, w, p1, nbins: this.nbins, perBin: P.dm, sm }));
+      if (gen !== this.gen) return;
+      this.seed(key, { k: r.k, p: r.p, n: r.n });
+      this.directInfo[p1 ? 'dir1' : 'dir0'] = { path: 'GPU', ms: r.ms, nmodes: r.nmodes, perBin: P.dm, batches: r.batches };
+    } catch (err) {
+      if (gen !== this.gen) return;
+      console.warn('[engine] GPU direct spectrum failed, using the WASM fallback where possible:', err);
+      this.dspFailed = true;
+      this.releaseEx2();
+    } finally { for (const b of temp) b.destroy(); }
+  }
   cic(P) {
     return this.memo(['cic', P.D, P.order], () => { this.ensureWasm(P.order); return this.time('CIC', () => this.sim.cic_density(P.D, P.order, this.n)); });
   }
@@ -717,6 +836,7 @@ export class Engine {
   fieldKey(which, P) {
     switch (which) {
       case 'sheet': case 'sheetp1': case 'sheetx': case 'sheetxp1': case 'cic': return [which, P.D, P.order];
+      case 'nufft': return ['nufft', P.D, P.order, P.rf];
       case 'hc': case 'hcz': case 'hcl': return this.hcKey(P, this.hcSrcOf(which, P));
       case 'hcdual': case 'hczdual': case 'hcldual': return ['hcd', ...this.hcKey(P, this.hcSrcOf(which, P))];
       default: return ['lin', P.D];
@@ -728,6 +848,7 @@ export class Engine {
       if (Engine.isHc(which)) return this.hc(P, this.hcSrcOf(which, P)).delta;
       if (Engine.isDual(which)) { const r = this.dualRho(P, this.hcSrcOf(which, P)), o = new Float32Array(r.length); for (let i = 0; i < o.length; i++) o[i] = r[i] - 1; return o; }
       if (which === 'lin') return this.linear(P);
+      if (which === 'nufft') { const r = this.nufft(P), o = new Float32Array(r.length); for (let i = 0; i < o.length; i++) o[i] = r[i] - 1; return o; }
       const rho = which === 'sheet' ? this.sheet(P) : which === 'sheetp1' ? this.sheetP1(P) : Engine.isExact(which) ? this.sheetExact(P, which === 'sheetxp1') : this.cic(P);
       const o = new Float32Array(rho.length);
       for (let i = 0; i < o.length; i++) o[i] = rho[i] - 1;

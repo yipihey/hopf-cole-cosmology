@@ -14,7 +14,7 @@ import { slider, readout } from '../viz/ui.js';
 import { transpose2D, slice3D, percentiles } from '../hcc.js';
 import { el, sel, fmtNum } from './dom.js';
 import { Engine } from './engine.js';
-import { DUAL_COLOR, P1_COLOR, EXACT0_COLOR, EXACT1_COLOR } from './spectra.js';
+import { DUAL_COLOR, P1_COLOR, EXACT0_COLOR, EXACT1_COLOR, NUFFT_COLOR } from './spectra.js';
 
 /** Reference sheet choices: S.sref -> Engine field name, short label, spectrum colour. */
 const REFS = {
@@ -22,6 +22,7 @@ const REFS = {
   p1: { name: 'sheetp1', label: 'P1 sheet', color: P1_COLOR },
   x: { name: 'sheetx', label: 'exact P0 sheet', color: EXACT0_COLOR },
   xp1: { name: 'sheetxp1', label: 'exact P1 sheet', color: EXACT1_COLOR },
+  nu: { name: 'nufft', label: 'NUFFT density', color: NUFFT_COLOR },
 };
 
 const DENS_CMAP = 'magma', DIFF_CMAP = 'rdbu';
@@ -87,8 +88,8 @@ export class LegendreLab {
     const bar = this.bar = el('div', 'hcc-controls lab-fbar', this.root);
     this.rmin = slider(bar, { label: 'ρ min', min: 0.01, max: 1, value: S.rmin, log: true, onInput: (v) => { S.rmin = v; this.rangeChanged(); } });
     this.rmax = slider(bar, { label: 'ρ max', min: 3, max: 1000, value: S.rmax, log: true, onInput: (v) => { S.rmax = v; this.rangeChanged(); } });
-    this.refSel = sel(bar, { label: 'sheet reference', options: [['plain', 'plain (constant per simplex)'], ['p1', 'P1 (vertex-interpolated)'], ['x', 'exact P0 (clipped)'], ['xp1', 'exact P1 (clipped)']], value: S.sref,
-      title: 'Which sheet density the three difference maps, the readouts and the spectrum ratios are measured against. The P1 sheet interpolates the vertex densities 1/|J| linearly inside each simplex (exactly mass conserving, second-order accurate), so it has much less rasterization noise than the plain sheet. The exact options clip every simplex against the cells it overlaps and deposit the exact integral of its (constant or vertex-interpolated) density: no sampling noise at all and mass conserved to roundoff.',
+    this.refSel = sel(bar, { label: 'sheet reference', options: [['plain', 'plain (constant per simplex)'], ['p1', 'P1 (vertex-interpolated)'], ['x', 'exact P0 (clipped)'], ['xp1', 'exact P1 (clipped)'], ['nu', 'NUFFT density (refined map)']], value: S.sref,
+      title: 'Which sheet density the three difference maps, the readouts and the spectrum ratios are measured against. The P1 sheet interpolates the vertex densities 1/|J| linearly inside each simplex (exactly mass conserving, second-order accurate), so it has much less rasterization noise than the plain sheet. The exact options clip every simplex against the cells it overlaps and deposit the exact integral of its (constant or vertex-interpolated) density: no sampling noise at all and mass conserved to roundoff. NUFFT: the Lagrangian trapezoidal-rule density of the Fourier-refined map (type-1 NUFFT, WASM; 3D up to 64³ with refine ≤ 2, refine from the Spectra toolbar): all streams, no facets and no simplex-shape error.',
       onChange: (v) => { S.sref = v; this.app.hashChanged(); this.refChanged(); } });
     this.sliceBar = el('span', 'lab-leg-slice', bar);
     this.axSel = sel(this.sliceBar, { label: 'slice axis ⟂', options: [[0, 'x'], [1, 'y'], [2, 'z']], value: S.sa, onChange: (v) => { S.sa = Number(v); this.sliceMoved(); } });
@@ -153,8 +154,13 @@ export class LegendreLab {
     this.warn3.textContent = d3 ? 'Reference: the tetrahedral sheet density (six Kuhn simplices per Lagrangian cell, point-sampled). With GPU compute on, the nLPT build, the sheet, the Legendre inversion (including the transverse correction) and the spectra all run in WebGPU compute shaders (milliseconds at 64³–128³); otherwise WASM (about 1 s at 64³). Slices share the axis and index of the slice panel in the Fields section.' : '';
   }
   /** Name of the reference sheet field in the Engine. */
-  refName() { return (REFS[this.app.S.sref] || REFS.plain).name; }
-  refInfo() { return REFS[this.app.S.sref] || REFS.plain; }
+  refName(P = this.app.P) { return this.refInfo(P).name; }
+  /** The reference choice; the NUFFT density falls back to the plain sheet on grids where it is unavailable (see Engine.nufftInfo). */
+  refInfo(P = this.app.P) {
+    const r = REFS[this.app.S.sref] || REFS.plain;
+    if (r.name === 'nufft' && P && P.mode === this.app.S.mode && !this.app.eng.nufftInfo(P).ok) return REFS.plain;
+    return r;
+  }
   refChanged() {
     this.refSel.set(this.app.S.sref);
     if (this.app.visible('l') && this.app.eng.sim && this.app.eng.dim === this.app.S.mode) this.app.runSection('l');
@@ -192,9 +198,9 @@ export class LegendreLab {
     const e = this.app.eng, d3 = P.mode === 3;
     const t = [];
     const gpu3 = d3 && e.gpuActive(P);
-    const ref = this.refName(), ri = this.refInfo(), exact = Engine.isExact(ref);
+    const ref = this.refName(P), ri = this.refInfo(P), exact = Engine.isExact(ref);
     this.warnBig.hidden = !(d3 && !gpu3 && P.n > (exact ? 32 : 64));
-    t.push({ label: (d3 ? (gpu3 ? 'Legendre lab: sheet (tetrahedra, GPU)' : 'Legendre lab: sheet (tetrahedra, CPU)') : 'Legendre lab: sheet') + (ri.name !== 'sheet' ? ' ' + ri.label.replace(' sheet', '') : ''), heavy: d3 && !gpu3,
+    t.push({ label: (d3 ? (gpu3 ? 'Legendre lab: sheet (tetrahedra, GPU)' : 'Legendre lab: sheet (tetrahedra, CPU)') : 'Legendre lab: sheet') + (ri.name !== 'sheet' ? ' ' + ri.label.replace(' sheet', '') : ''), heavy: (d3 && !gpu3) || Engine.isNufft(ref),
       fn: async () => { await e.need('field', ref, P); e.delta(ref, P); } });
     t.push({ label: 'Legendre lab: Hopf–Cole (Legendre, Zel’dovich)', fn: async () => {
       await e.need('field', 'hcl', P); await e.need('field', 'hcz', P);
@@ -225,7 +231,7 @@ export class LegendreLab {
     if (!e.sim || e.dim !== P.mode) return;
     this.lastP = P;
     const n = P.n, order = P.order;
-    const rf = this.refName(), ri = this.refInfo(), rn = ri.name === 'sheet' ? 'sheet' : ri.label, p1 = ri.name !== 'sheet', exact = Engine.isExact(rf);
+    const rf = this.refName(P), ri = this.refInfo(P), rn = ri.name === 'sheet' ? 'sheet' : ri.label, p1 = ri.name !== 'sheet', exact = Engine.isExact(rf), nuf = Engine.isNufft(rf);
     const dS = e.delta(rf, P), dL = e.delta('hcl', P), dZ = e.delta('hcz', P), dU = e.delta('hcldual', P);
     const ref = Math.max(rmsOf(dS), 1e-12);
     const diffL = subtract(dL, dS), diffZ = subtract(dZ, dS), diffU = subtract(dU, dS);
@@ -238,7 +244,7 @@ export class LegendreLab {
 
     const lpt = P.hs === 'lptT' ? `${ordName(order)}${order > 2 ? ' + transverse' : ''}` : ordName(order);
     const where = P.mode === 3 ? ` on the plane ${['x', 'y', 'z'][S.sa]} = ${Math.max(0, Math.min(n - 1, Math.round(S.si * (n - 1))))} of ${n}` : '';
-    this.pSheet.titleEl.textContent = `${p1 ? ri.label[0].toUpperCase() + ri.label.slice(1) : 'Sheet'} density (${ordName(order)})`;
+    this.pSheet.titleEl.textContent = nuf ? `NUFFT density (${ordName(order)}, refine ${P.rf})` : `${p1 ? ri.label[0].toUpperCase() + ri.label.slice(1) : 'Sheet'} density (${ordName(order)})`;
     this.pLeg.titleEl.textContent = `Legendre Hopf–Cole (${lpt})`;
     this.pZel.titleEl.textContent = 'Zel’dovich Hopf–Cole (1LPT)';
     this.pdLeg.titleEl.textContent = `Legendre − ${rn}`;
@@ -248,7 +254,9 @@ export class LegendreLab {
     this.ro.zel.label.textContent = `rms(ZelHC − ${rn}) / rms(${rn} − 1)`;
     this.ro.dual.label.textContent = `rms(dual − ${rn}) / rms(${rn} − 1)`;
     const nuTxt = `ν = ${P.nu.toExponential(1)}`;
-    this.pSheet.cap.textContent = (exact
+    this.pSheet.cap.textContent = (nuf
+      ? `Multi-stream reference without simplex facets: the Lagrangian trapezoidal rule ∫d^dq δ(x − x(q)) of the Fourier-refined ${ordName(order)} map (displacement interpolated spectrally to ${P.rf}× the grid), evaluated through a type-1 NUFFT (Gaussian kernel, 2× oversampling); spectrally accurate for a band-limited displacement, counts all streams${where}.`
+      : exact
       ? `Multi-stream reference without sampling noise: every ${P.mode === 3 ? 'Kuhn tetrahedron' : 'triangle'} of the ${ordName(order)} map x(q,D) is clipped against the cells it overlaps and deposits the exact integral of its ${rf === 'sheetxp1' ? 'vertex-interpolated (linear 1/|J|)' : 'constant'} density profile; mass is conserved to roundoff${where}. After shell crossing it adds the streams.`
       : p1
       ? `Multi-stream reference with a linear density shape: inside each ${P.mode === 3 ? 'Kuhn tetrahedron' : 'triangle'} of the ${ordName(order)} map x(q,D) the density is interpolated between the vertex values 1/|J|, rescaled so that every simplex deposits exactly its mass${P.mode === 3 ? ' (point-sampled)' : ' (2×2 supersampled)'}${where}. Its rasterization noise is far smaller than that of the plain sheet; after shell crossing it adds the streams.`
@@ -294,7 +302,7 @@ export class LegendreLab {
   drawSpectra(P) {
     const e = this.app.eng, dim = e.dim;
     const kmax = Math.sqrt(dim) * e.knyq, kmin = 0.8 * e.kf;
-    const ref = this.refName(), ri = this.refInfo(), p1 = ri.name !== 'sheet';
+    const ref = this.refName(P), ri = this.refInfo(P), p1 = ri.name !== 'sheet';
     this.pkTitle.textContent = `Power spectra: ${ri.label}, Legendre, Zel’dovich HC, dual sheet`;
     const sh = e.pk(ref, P, false), le = e.pk('hcl', P, false), ze = e.pk('hcz', P, false), du = e.pk('hcldual', P, false), li = e.plinFine(P);
     const lpt = P.hs === 'lptT' && P.order > 2 ? 'Legendre (nLPT + transverse)' : 'Legendre (nLPT)';

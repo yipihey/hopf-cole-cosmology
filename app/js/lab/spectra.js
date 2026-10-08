@@ -3,12 +3,15 @@
 import { LinePlot, PALETTE } from '../viz/plot.js';
 import { slider, checkbox, readout } from '../viz/ui.js';
 import { fitCounterterm } from '../hcc.js';
-import { el, fmtNum } from './dom.js';
+import { el, sel, fmtNum } from './dom.js';
 
 export const DUAL_COLOR = '#6a3d9a';
 export const P1_COLOR = '#a0522d';
 export const EXACT0_COLOR = '#9a9a00';
 export const EXACT1_COLOR = '#0aa5b5';
+export const DIRECT0_COLOR = '#d6336c';
+export const DIRECT1_COLOR = '#2b8a3e';
+export const NUFFT_COLOR = '#e8590c';
 
 const SERIES = [
   ['lin', 'linear theory'],
@@ -16,6 +19,9 @@ const SERIES = [
   ['sheetp1', 'sheet P1 (vertex-interpolated)'],
   ['sheetx', 'sheet exact P0 (clipped)'],
   ['sheetxp1', 'sheet exact P1 (clipped)'],
+  ['dir0', 'direct sheet spectrum (P0)'],
+  ['dir1', 'direct sheet spectrum (P1)'],
+  ['nufft', 'NUFFT density (refined map)'],
   ['cic', 'CIC (deconv.)'],
   ['hc', 'Hopf–Cole (selected source)'],
   ['hcdual', 'Hopf–Cole dual sheet'],
@@ -48,8 +54,20 @@ export class Spectra {
     this.kmaxSl = slider(cbs, { label: 'EFT k_max', min: 8, max: 2000, value: S.km, log: true, format: (v) => v.toFixed(0),
       onInput: (v) => { S.km = v; app.hashChanged(); this.drawIfReady(); } });
     this.csOut = readout(cbs, { label: 'c_s²' });
+    // direct (deposit-free) spectra and NUFFT density: modes per |k| bin and refinement of the Fourier-interpolated map
+    this.dmSl = slider(cbs, { label: 'modes / bin', min: 32, max: 512, value: S.dm, log: true, format: (v) => String(Math.round(v)),
+      onInput: (v) => { S.dm = Math.round(v); app.hashChanged(); clearTimeout(this.dmTimer); this.dmTimer = setTimeout(() => app.modesChanged(), 250); } });
+    this.dmSl.el.title = 'Lattice modes sampled per |k| bin for the direct sheet spectra (shells with fewer modes are enumerated completely). More modes: less scatter, proportionally more GPU time.';
+    this.rfSel = sel(cbs, { label: 'NUFFT refine', options: [[1, '1 (n)'], [2, '2 (2n)'], [4, '4 (4n)']], value: S.rf,
+      title: 'Spectral refinement of the Lagrangian grid for the NUFFT density: the displacement is Fourier-interpolated to refine x n points per axis before the trapezoidal rule. 3D: up to 64³ with refine ≤ 2.',
+      onChange: (v) => { S.rf = Number(v); app.hashChanged(); app.refineChanged(); } });
     this.pkHost = el('div', 'lab-plot', pp);
     this.pkPlot = new LinePlot(this.pkHost, { width: 500, height: 380 });
+    this.dirNote = el('p', 'lab-warn-note', pp); this.dirNote.hidden = true;
+    this.dirInfo = el('p', 'hcc-note lab-cap lab-dirinfo', pp); this.dirInfo.hidden = true;
+    this.dirCap = el('p', 'hcc-note lab-cap', pp, 'Direct sheet spectrum (P0 = constant, P1 = linear density per simplex): exact Fourier transform of the piecewise-linear sheet, sampled on lattice modes; no grid, no window, no aliasing — the k⁻³ facet tail is real.');
+    this.nufftCap = el('p', 'hcc-note lab-cap', pp, 'NUFFT density: Lagrangian integral ∫d^dq e^{−ik·x(q)} of the Fourier-refined map by the periodic trapezoidal rule (type-1 NUFFT, Gaussian kernel, 2× oversampling); spectrally accurate for a band-limited displacement, counts all streams, no facets.');
+    this.dirCap.hidden = true; this.nufftCap.hidden = true;
     el('p', 'hcc-note lab-cap', pp, 'Dashed vertical lines mark k_Nyq and the smoothing scale 1/R. The P1 sheet interpolates the vertex densities 1/|J| linearly inside every simplex (mass-conserving, second-order accurate), so it carries less high-k rasterization noise than the plain sheet. The exact sheet deposits clip every simplex against the cells it overlaps and integrate its (constant or vertex-interpolated) density over each piece: no sampling noise, mass conserved to roundoff, so their spectra sit below the point-sampled ones at high k, where only the facet structure of the simplices remains. The Hopf–Cole dual sheet is the mass-conserving density of the same inverse map (cell mass = Lagrangian volume of the cell’s preimage). Linear theory is the smooth curve D²P0(k); the 1-loop curves are only available for Gaussian ICs. The EFT curve subtracts 2c_s²k²P_lin from the SPT 1-loop with c_s² fitted to the measured spectrum for k < k_max.');
 
     // ---- r(k) panel
@@ -80,6 +98,8 @@ export class Spectra {
     this.checks.sheetx.el.querySelector('.hcc-label').textContent = d3 ? 'sheet exact P0 (tetrahedra)' : 'sheet exact P0 (clipped)';
     this.checks.sheetxp1.el.querySelector('.hcc-label').textContent = d3 ? 'sheet exact P1 (tetrahedra)' : 'sheet exact P1 (clipped)';
     this.checks.cic.el.querySelector('.hcc-label').textContent = d3 ? 'CIC (measured, deconv.)' : 'CIC (deconv.)';
+    this.checks.nufft.el.querySelector('.hcc-label').textContent = d3 ? 'NUFFT density (refined map; ≤ 64³, refine ≤ 2)' : 'NUFFT density (refined map)';
+    this.dmSl.set(this.app.S.dm); this.rfSel.set(this.app.S.rf);
     const ser = this.app.S.ser;
     for (const id of Object.keys(this.checks)) this.checks[id].set(ser.includes(id));
   }
@@ -103,6 +123,15 @@ export class Spectra {
     if (w.has('sheetp1')) t.push({ label: dim === 3 ? 'P(k) sheet P1 (tetrahedra)' : 'P(k) sheet P1', fn: async () => { await e.need('analysis', 'sheetp1', P); e.pk('sheetp1', P, false); } });
     if (w.has('sheetx')) t.push({ label: 'P(k) sheet exact P0', heavy: dim === 3 && !e.gpuActive(P), fn: async () => { await e.need('analysis', 'sheetx', P); e.pk('sheetx', P, false); } });
     if (w.has('sheetxp1')) t.push({ label: 'P(k) sheet exact P1', heavy: dim === 3 && !e.gpuActive(P), fn: async () => { await e.need('analysis', 'sheetxp1', P); e.pk('sheetxp1', P, false); } });
+    for (const [id, p1] of [['dir0', false], ['dir1', true]]) {
+      if (!w.has(id)) continue;
+      t.push({ label: `direct sheet spectrum (${p1 ? 'P1' : 'P0'}${e.directGpuPossible(P) ? ', GPU' : ''})`, heavy: !e.directGpuPossible(P),
+        fn: async () => { await e.needDirect(p1, P); e.directPk(p1, P); } });
+    }
+    if (w.has('nufft')) t.push({ label: 'P(k) NUFFT density', heavy: true, fn: async () => {
+      if (!e.nufftInfo(P).ok) return;
+      await e.need('analysis', 'nufft', P); e.pk('nufft', P, false);
+    } });
     if (w.has('cic')) t.push({ label: 'P(k) CIC', fn: async () => { await e.need('analysis', 'cic', P); e.pk('cic', P, true); } });
     if (w.has('hc')) t.push({ label: 'P(k) Hopf–Cole', fn: async () => { await e.need('analysis', 'hc', P); e.pk('hc', P); } });
     if (w.has('hcdual')) t.push({ label: 'P(k) Hopf–Cole dual sheet', fn: async () => { await e.need('analysis', 'hcdual', P); e.pk('hcdual', P); } });
@@ -111,6 +140,7 @@ export class Spectra {
       if (w.has('hcdual')) { await e.need('analysis', 'hcdual', P); e.rk('hcdual', P); }
       if (w.has('sheetp1')) { await e.need('analysis', 'sheetp1', P); e.rk('sheetp1', P); }
       for (const m of ['sheetx', 'sheetxp1']) if (w.has(m)) { await e.need('analysis', m, P); e.rk(m, P); }
+      if (w.has('nufft') && e.nufftInfo(P).ok) { await e.need('analysis', 'nufft', P); e.rk('nufft', P); }
     } });
     const loops = gaussian && (w.has('spt') || w.has('eft') || w.has('p22') || w.has('p13') || w.has('za'));
     // lite: show the measured spectra first, the 1-loop curves (0.3 s in WASM) follow in a second drawing; only when this section is visible
@@ -147,6 +177,23 @@ export class Spectra {
     }
     if (w.has('sheetx')) { const s = e.pk('sheetx', P, false); series.push({ x: s.k, y: s.p, label: dim === 3 ? 'sheet exact P0 (tetrahedra)' : 'sheet exact P0', color: EXACT0_COLOR, points: true, width: 1.2, radius: 2.2 }); }
     if (w.has('sheetxp1')) { const s = e.pk('sheetxp1', P, false); series.push({ x: s.k, y: s.p, label: dim === 3 ? 'sheet exact P1 (tetrahedra)' : 'sheet exact P1', color: EXACT1_COLOR, points: true, width: 1.2, radius: 2.2 }); }
+    const notes = [], infos = [];
+    for (const [id, p1, color, lab] of [['dir0', false, DIRECT0_COLOR, 'direct sheet spectrum (P0)'], ['dir1', true, DIRECT1_COLOR, 'direct sheet spectrum (P1)']]) {
+      if (!w.has(id)) continue;
+      const s = e.directPk(p1, P);
+      if (!s) { notes.push(e.directNote(p1, P) || `direct sheet spectrum (${p1 ? 'P1' : 'P0'}) is not available yet.`); continue; }
+      series.push({ x: s.k, y: s.p, label: lab, color, points: true, width: 1.2, radius: 2.6 });
+      const i = e.directInfo[id];
+      if (i) infos.push(`${lab}: ${i.path === 'GPU' ? 'GPU kernel' : 'WASM fallback'}, ${Math.round(i.nmodes).toLocaleString('en-US')} lattice modes (${i.perBin} per bin), ${i.ms >= 1000 ? (i.ms / 1000).toFixed(2) + ' s' : Math.round(i.ms) + ' ms'}`);
+    }
+    if (w.has('nufft')) {
+      const ni = e.nufftInfo(P);
+      if (!ni.ok) notes.push(ni.note);
+      else { const s = e.pk('nufft', P, false); series.push({ x: s.k, y: s.p, label: `NUFFT density (refine ${P.rf})`, color: NUFFT_COLOR, points: true, width: 1.2, radius: 2.4 }); }
+    }
+    this.dirNote.hidden = notes.length === 0; this.dirNote.textContent = notes.join(' ');
+    this.dirInfo.hidden = infos.length === 0; this.dirInfo.textContent = infos.join(' · ');
+    this.dirCap.hidden = !(w.has('dir0') || w.has('dir1')); this.nufftCap.hidden = !w.has('nufft');
     if (w.has('cic')) {
       const s = e.pk('cic', P, true);
       series.push(dim === 2 ? { x: s.k, y: s.p, label: 'CIC (deconv.)', color: PALETTE[5], points: true, width: 1, radius: 2 }
@@ -201,6 +248,7 @@ export class Spectra {
     if (w.has('sheetp1')) { const r1 = e.rk('sheetp1', P); rs.push({ x: r1.k, y: r1.r, label: `${dim === 2 ? 'sheet' : 'tetrahedral sheet'} P1 × linear`, color: P1_COLOR, points: true, width: 1.2, radius: 2.2 }); }
     if (w.has('sheetx')) { const rx = e.rk('sheetx', P); rs.push({ x: rx.k, y: rx.r, label: `${dim === 2 ? 'sheet' : 'tetrahedral sheet'} exact P0 × linear`, color: EXACT0_COLOR, points: true, width: 1.2, radius: 2.2 }); }
     if (w.has('sheetxp1')) { const rx = e.rk('sheetxp1', P); rs.push({ x: rx.k, y: rx.r, label: `${dim === 2 ? 'sheet' : 'tetrahedral sheet'} exact P1 × linear`, color: EXACT1_COLOR, points: true, width: 1.2, radius: 2.2 }); }
+    if (w.has('nufft') && e.nufftInfo(P).ok) { const rx = e.rk('nufft', P); rs.push({ x: rx.k, y: rx.r, label: `NUFFT density (refine ${P.rf}) × linear`, color: NUFFT_COLOR, points: true, width: 1.2, radius: 2.4 }); }
     if (w.has('hcdual')) { const rd = e.rk('hcdual', P); rs.push({ x: rd.k, y: rd.r, label: 'Hopf–Cole dual sheet' + hcTag + ' × linear', color: DUAL_COLOR, points: true, width: 1.2, radius: 2 }); }
     const sv2 = e.sigmaV2();
     if (sv2 !== null) {

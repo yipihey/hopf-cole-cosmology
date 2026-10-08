@@ -24,7 +24,11 @@
      (0 = skip); <code>skipold=1</code> skips the older checks.
      Exact (clipping-based) sheet deposits (<code>exact2d.js</code>: triangles, <code>exact3d.js</code> + <code>sheet3d.js</code>: tetrahedra, P0 and P1): per-cell moments of the 70 r3d fixtures
      (<code>fixtures_r3d.txt</code>, Julia R3D.jl reference), full deposits against WASM <code>sheet_density_exact</code> (<code>exval3=32,64</code>, <code>exval2=128,256</code>)
-     and timings (<code>exbench2=256,512</code>, <code>exbench3=64,128</code>); <code>onlyexact=1</code> runs only these, <code>noexact=1</code> skips them, <code>nofix=1</code> skips the fixtures.</p>
+     and timings (<code>exbench2=256,512</code>, <code>exbench3=64,128</code>); <code>onlyexact=1</code> runs only these, <code>noexact=1</code> skips them, <code>nofix=1</code> skips the fixtures.<br>
+     Direct (deposit-free) sheet spectra (<code>direct.js</code>: divided differences of the exponential over the simplices, P0 and P1, two-stage reduction):
+     per-mode checks against the f64 JS port of <code>core/src/direct.rs</code> (<code>dval2=32</code>, <code>dval3=16</code>), against Gauss&ndash;Legendre quadrature of the simplex integrals
+     (<code>dquad2=16</code>, <code>dquad3=8</code>), binned spectra against WASM <code>direct_spectrum</code> with the same lattice modes (<code>dwasm=64</code>; P1 takes ~10 s in WASM) and timings with 20 bins &times; 128 modes
+     (<code>dbench2=256,512</code>, <code>dbench3=64,128</code>); <code>onlydirect=1</code> runs only these, <code>nodirect=1</code> skips them.</p>
   <button id="run">Run</button>
   <table id="tbl"><tr><th>n</th><th>check</th><th>value</th><th>tolerance</th><th>result</th></tr></table>
   <pre id="out"></pre>

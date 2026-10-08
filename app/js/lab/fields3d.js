@@ -10,9 +10,9 @@ import { Engine } from './engine.js';
 import { exactNote } from './catalog.js';
 
 const CMAPS = Object.keys(COLORMAPS).map((c) => [c, c]);
-const FIELDS = [['cic', 'CIC density'], ['sheet', 'Sheet density (tetrahedra)'], ['sheetp1', 'Sheet density (P1, vertex-interpolated)'], ['sheetx', 'Sheet density (exact P0)'], ['sheetxp1', 'Sheet density (exact P1)'], ['hc', 'Hopf–Cole density'], ['hcdual', 'Hopf–Cole dual sheet (mass-conserving)'], ['lin', 'Linear density 1+Dδ0']];
+const FIELDS = [['cic', 'CIC density'], ['sheet', 'Sheet density (tetrahedra)'], ['sheetp1', 'Sheet density (P1, vertex-interpolated)'], ['sheetx', 'Sheet density (exact P0)'], ['sheetxp1', 'Sheet density (exact P1)'], ['nufft', 'NUFFT density (refined map)'], ['hc', 'Hopf–Cole density'], ['hcdual', 'Hopf–Cole dual sheet (mass-conserving)'], ['lin', 'Linear density 1+Dδ0']];
 const DUAL_NOTE = ' The mass of a cell is the Lagrangian volume of its preimage under the Hopf–Cole inverse map (the hexahedron spanned by q at its eight corners, six Kuhn tetrahedra), so mass is conserved exactly and peaks are not under-resolved by finite differences; before shell crossing it should beat the finite-difference Hopf–Cole density in peaks and the forward sheet in voids.';
-const FNAME = { cic: 'CIC density', sheet: 'tetrahedral sheet density (Kuhn simplices, point-sampled)', sheetp1: 'P1 sheet density (tetrahedra, linear vertex-interpolated shape, mass-conserving)', sheetx: 'exact tetrahedral sheet density (P0: constant per simplex, clipped against the cells)', sheetxp1: 'exact tetrahedral sheet density (P1: linear vertex-interpolated shape, clipped against the cells)', hc: 'Hopf–Cole density 1+δ', hcdual: 'Hopf–Cole dual sheet density (mass-conserving)', lin: 'linear density 1+Dδ0 (clipped at 10⁻³)' };
+const FNAME = { cic: 'CIC density', sheet: 'tetrahedral sheet density (Kuhn simplices, point-sampled)', sheetp1: 'P1 sheet density (tetrahedra, linear vertex-interpolated shape, mass-conserving)', sheetx: 'exact tetrahedral sheet density (P0: constant per simplex, clipped against the cells)', sheetxp1: 'exact tetrahedral sheet density (P1: linear vertex-interpolated shape, clipped against the cells)', nufft: 'NUFFT density of the Fourier-refined map (type-1 NUFFT of the Lagrangian trapezoidal rule, all streams, no facets)', hc: 'Hopf–Cole density 1+δ', hcdual: 'Hopf–Cole dual sheet density (mass-conserving)', lin: 'linear density 1+Dδ0 (clipped at 10⁻³)' };
 
 export class Fields3D {
   constructor(app, host) {
@@ -123,9 +123,9 @@ export class Fields3D {
     const S = this.app.S, e = this.app.eng, warm = e.gpuActive(P) && !!e.g && !!e.ref;
     const dep = this.dependsOnHc();
     const t = [
-      { label: 'volume', heavy: !warm, fn: () => this.updateVolume(P), hc: dep.vol },
-      { label: 'slice', heavy: (S.s1 === 'sheet' || S.s1 === 'sheetp1' || S.s1 === 'sheetx' || S.s1 === 'sheetxp1') && !warm, fn: () => this.updateSlice(P), hc: dep.slice },
-      { label: 'Fourier amplitude', heavy: !warm, fn: () => this.updateFourier(2, P), hc: dep.fourier },
+      { label: 'volume', heavy: !warm || Engine.isNufft(S.v1), fn: () => this.updateVolume(P), hc: dep.vol },
+      { label: 'slice', heavy: Engine.isNufft(S.s1) || (S.s1 === 'sheet' || S.s1 === 'sheetp1' || S.s1 === 'sheetx' || S.s1 === 'sheetxp1') && !warm, fn: () => this.updateSlice(P), hc: dep.slice },
+      { label: 'Fourier amplitude', heavy: !warm || Engine.isNufft(S.fo), fn: () => this.updateFourier(2, P), hc: dep.fourier },
       { label: 'Fourier phase', heavy: false, fn: () => this.updateFourier(3, P), hc: dep.fourier },
     ];
     return hcOnly ? t.filter((q) => q.hc) : t;
@@ -149,6 +149,15 @@ export class Fields3D {
 
   P() { return this.app.P; }
 
+  /** NUFFT density panels on grids where the refined fine grid is too big: write the reason into the caption and skip the panel. */
+  nufftBlocked(which, P, cap) {
+    if (!Engine.isNufft(which)) return false;
+    const ni = this.app.eng.nufftInfo(P);
+    if (ni.ok) return false;
+    cap.textContent = ni.note;
+    return true;
+  }
+
   async updateVolume(P = this.P()) {
     const S = this.app.S, eng = this.app.eng;
     if (!eng.sim) return;
@@ -161,6 +170,7 @@ export class Fields3D {
     }
     if (!this.vv) { this.vv = new VolumeView(this.cvV, { cmap: S.c1 }); this.vvInit = this.vv.init(); }
     await this.vvInit;
+    if (this.nufftBlocked(S.v1, P, this.capV)) { this.pv.root.classList.remove('is-stale'); return; }
     await eng.need('field', S.v1, P);
     const rho = eng.rho(S.v1, P);
     this.vv.setVolume(rho, eng.n);
@@ -170,6 +180,7 @@ export class Fields3D {
       + (S.v1 === 'sheetp1' ? ' The density inside each tetrahedron varies linearly between the vertex values 1/|J| (barycentric interpolation, rescaled so every simplex still deposits exactly its mass)' + (eng.lastPath === 'GPU' && eng.gpuActive(P) ? '; GPU: the vertex densities come from a finite-difference Jacobian of the displacement.' : '; WASM (GPU compute off): about 1 s at 64³.') : '')
       + (S.v1 === 'sheet' ? (eng.lastPath === 'GPU' && eng.gpuActive(P) ? ' GPU: one thread per Lagrangian cell, six Kuhn tetrahedra, watertight point-in-tetrahedron tests, 18-bit fixed-point atomics.' : ` WASM (GPU compute off): about 1 s at 64³, 4 s at 96³${eng.n >= 128 ? '; at 128³ this takes tens of seconds, prefer CIC or Hopf–Cole' : ''}.`) : '')
       + (Engine.isExact(S.v1) ? ' Every simplex is clipped against the cells it overlaps and deposits the exact integral of its density profile; no sampling noise, mass conserved to roundoff.' + (S.v1 === 'sheetxp1' ? ' P1: the vertex densities 1/|J| are interpolated linearly inside each tetrahedron.' : '') + exactNote(eng, S.v1) + (eng.lastPath !== 'GPU' || !eng.gpuActive(P) ? ' WASM (GPU compute off): about 1 s at 32³, 2–3 s at 64³.' : '') : '')
+      + (S.v1 === 'nufft' ? ` Refine ${P.rf}: the displacement is Fourier-interpolated to ${P.rf}n points per axis and the trapezoidal rule is evaluated by a type-1 NUFFT (WASM, a few seconds at 64³ with refine 2); spectrally accurate for a band-limited displacement, counts all streams.` : '')
       + (S.v1 === 'hcdual' ? DUAL_NOTE : '')
       + (gpuCic ? ' GPU CIC deposits 18-bit fixed-point weights with integer atomics (mass conserved exactly); a cell would overflow at ρ/ρ̄ ≥ 16384.' : '');
     this.drawVolume();
@@ -190,6 +201,7 @@ export class Fields3D {
     if (!eng.sim) return;
     if (!this.fvS) { this.fvS = new FieldView(this.cvS, { cmap: S.c2 }); this.fvSInit = this.fvS.init(); }
     await this.fvSInit;
+    if (this.nufftBlocked(S.s1, P, this.capS)) { this.ps.root.classList.remove('is-stale'); return; }
     await eng.need('field', S.s1, P);
     const n = eng.n;
     const idx = Math.max(0, Math.min(n - 1, Math.round(S.si * (n - 1))));
@@ -216,6 +228,7 @@ export class Fields3D {
     if (!this[key]) { this[key] = new FieldView(this['cvF' + slot], { cmap: abs ? S.c3 : S.c4 }); this[key + 'Init'] = this[key].init(); }
     await this[key + 'Init'];
     const fv = this[key], n = eng.n;
+    if (this.nufftBlocked(S.fo, P, this['capF' + slot])) { this['pf' + slot].root.classList.remove('is-stale'); return; }
     await eng.need('analysis', S.fo, P);
     const m = eng.fmaps(S.fo, P);
     const arr = abs ? m.amp : m.phase;
@@ -229,7 +242,7 @@ export class Fields3D {
     fv.draw();
     const r = fv.getRange();
     renderColorbar(this['barF' + slot], cmap, r.vmin, r.vmax, { label: abs ? 'log₁₀|δ̂|/max' : 'arg δ̂ [rad]' });
-    const what = { cic: 'CIC', sheet: 'sheet', sheetp1: 'P1 sheet', sheetx: 'exact P0 sheet', sheetxp1: 'exact P1 sheet', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' }[S.fo];
+    const what = { cic: 'CIC', sheet: 'sheet', sheetp1: 'P1 sheet', sheetx: 'exact P0 sheet', sheetxp1: 'exact P1 sheet', nufft: 'NUFFT', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' }[S.fo];
     this['capF' + slot].textContent = abs
       ? `log₁₀|δ̂(k)|/max of the ${what} density in the k_z = 0 plane (k_x horizontal, k_y vertical, k = 0 at the centre).`
       : `Phase of δ̂(k) of the ${what} density in the k_z = 0 plane. Mode coupling correlates the phases of generated modes with those of their parents.`;

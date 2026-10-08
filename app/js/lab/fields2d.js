@@ -135,6 +135,11 @@ class Slot {
         this.note.textContent = 'WebGPU unavailable: showing the CPU-rasterized ' + (def.p1 ? 'P1 ' : '') + 'sheet density instead.';
       }
       const fv = await this.ensureFV();
+      // NUFFT density (WASM): unavailable on grids where the refined fine grid would be too large
+      if (kind === 'nufft' || (def.fourier && sub === 'nufft')) {
+        const ni = eng.nufftInfo(P);
+        if (!ni.ok) { this.note.hidden = false; this.note.textContent = ni.note; this.markStale(false); return; }
+      }
       // exact (clipped) sheet deposits come from the GPU clipper when available: make them resident before the synchronous getters run
       const needF = def.need || ((def.fourier && Engine.isExact(sub)) ? sub : null);
       if (needF) await eng.need('field', needF, P);

@@ -5,8 +5,8 @@ import { fmap, percentiles, mean, minmax } from '../hcc.js';
 
 export const LIN_MAX = 5;       // upper colour limit for non-log density maps
 
-const SUB_OF = [['sheet', 'sheet'], ['sheetp1', 'sheet (P1)'], ['sheetx', 'sheet (exact P0)'], ['sheetxp1', 'sheet (exact P1)'], ['cic', 'CIC'], ['hc', 'Hopf–Cole'], ['hcdual', 'Hopf–Cole dual sheet'], ['lin', 'linear']];
-const OF_NAME = { sheet: 'sheet', sheetp1: 'P1 sheet', sheetx: 'exact P0 sheet', sheetxp1: 'exact P1 sheet', cic: 'CIC', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' };
+const SUB_OF = [['sheet', 'sheet'], ['sheetp1', 'sheet (P1)'], ['sheetx', 'sheet (exact P0)'], ['sheetxp1', 'sheet (exact P1)'], ['nufft', 'NUFFT density'], ['cic', 'CIC'], ['hc', 'Hopf–Cole'], ['hcdual', 'Hopf–Cole dual sheet'], ['lin', 'linear']];
+const OF_NAME = { sheet: 'sheet', sheetp1: 'P1 sheet', sheetx: 'exact P0 sheet', sheetxp1: 'exact P1 sheet', nufft: 'NUFFT', cic: 'CIC', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' };
 
 /** Shift the raw FFT-ordered n×n map [ikx*n+iky] so that k = 0 sits at the centre. */
 export function fftshift2D(a, n) {
@@ -65,6 +65,11 @@ export const CATALOG = {
     label: 'Sheet density (exact P1)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', need: 'sheetxp1',
     data: (e, P) => e.sheetExact(P, true),
     caption: (sub, P, e) => 'Every simplex is clipped against the cells it overlaps and deposits the exact integral of its vertex-interpolated (linear) density profile; no sampling noise, mass conserved to roundoff.' + exactNote(e, 'sheetxp1'),
+  },
+  nufft: {
+    label: 'NUFFT density (refined map)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', avail: true,
+    data: (e, P) => e.nufft(P),
+    caption: (sub, P) => `Lagrangian integral ∫d^dq e^{−ik·x(q)} of the Fourier-refined map by the periodic trapezoidal rule (type-1 NUFFT, Gaussian kernel, 2× oversampling); spectrally accurate for a band-limited displacement, counts all streams, no facets.${P && P.rf ? ` The displacement is Fourier-interpolated to ${P.rf}× the Lagrangian grid before the rule is applied (refine ${P.rf}), then the density is returned on the ${P.n} grid. WASM; about 1 s at 256² with refine 2.` : ''}`,
   },
   cic: {
     label: 'CIC density', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
@@ -139,7 +144,7 @@ export const CATALOG = {
   },
 };
 
-export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'sheetp1gpu', 'sheetp1cpu', 'sheetx', 'sheetxp1', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed'];
+export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'sheetp1gpu', 'sheetp1cpu', 'sheetx', 'sheetxp1', 'nufft', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed'];
 
 /** Percentile-based range helpers for special classes. */
 export function psihatRange(arr) {

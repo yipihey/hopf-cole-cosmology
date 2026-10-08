@@ -9,7 +9,7 @@
 
 import { LinePlot, PALETTE } from '../viz/plot.js';
 import { el, numIn, fmtNum } from './dom.js';
-import { DUAL_COLOR, P1_COLOR, EXACT0_COLOR, EXACT1_COLOR } from './spectra.js';
+import { DUAL_COLOR, P1_COLOR, EXACT0_COLOR, EXACT1_COLOR, NUFFT_COLOR } from './spectra.js';
 import { Engine } from './engine.js';
 
 export const NBIN = 60, X0 = -2, X1 = 2.5, DX = (X1 - X0) / NBIN;
@@ -92,6 +92,7 @@ export class PdfLab {
       'A lognormal (dashed grey: a Gaussian in log₁₀(1+δ) with the mean and variance of ln(1+δ) of the sheet in 2D, of CIC in 3D) is often a good approximation (Coles & Jones 1991), though it cannot capture the shape of the tail exactly.',
       'The P1 sheet gives every simplex a linear density shape (interpolating the vertex values 1/|J|) that still deposits exactly the simplex mass, so before shell crossing its PDF follows that of the plain sheet closely (the two differ only by cell-scale discretization noise), and it is the cleaner reference for the Hopf–Cole variants.',
       'The exact sheet deposits (P0 and P1) clip every simplex against the cells it overlaps and integrate its density over each piece, so they have no sampling noise at all: their grid-scale PDFs show only the real structure of the simplicial sheet, and are the cleanest reference for the other methods.',
+      'The NUFFT density is the Lagrangian trapezoidal-rule density of the Fourier-refined map: it counts every stream like the sheet but has no simplex facets and no sampling noise; at the grid scale its PDF is the cleanest multi-stream reference for a band-limited displacement.',
       'The Hopf–Cole dual sheet is the mass-conserving density of the Hopf–Cole inverse map (cell mass = Lagrangian volume of its preimage); before shell crossing it should follow the sheet closely in both the voids and the high-density tail, where the finite-difference Hopf–Cole density under-resolves the peaks.',
       'After shell crossing the multi-stream sheet adds the streams, whereas the Hopf–Cole (adhesion) solution keeps one stream and glues them into walls; the two therefore populate the high-density tail differently, and CIC adds its own smoothing of the sheet.',
       'Top-hat smoothing lowers the variance and Gaussianises the PDF (averaging many cells), so the smoothed curves lie closer to the Gaussian and the lognormal, and the rare high values of the grid-scale PDF disappear.',
@@ -124,6 +125,7 @@ export class PdfLab {
     const m = [];
     if (P.mode === 2 || !runtime || this.includeSheet(P)) m.push('sheet', 'sheetp1');
     if (P.mode === 2 || !runtime || this.includeExact(P)) m.push('sheetx', 'sheetxp1');
+    if (this.app.eng.nufftInfo(P).ok) m.push('nufft');
     m.push('cic', 'hc', 'hcdual');
     if (P.hs !== 'zel') m.push('hcz'); else m.push('hcl');
     m.push('lin');
@@ -139,6 +141,7 @@ export class PdfLab {
       case 'sheetp1': return { label: d3 ? 'sheet P1 (tetrahedra)' : 'sheet P1', color: P1_COLOR, width: 1.4 };
       case 'sheetx': return { label: d3 ? 'sheet exact P0 (tetrahedra)' : 'sheet exact P0', color: EXACT0_COLOR, width: 1.4 };
       case 'sheetxp1': return { label: d3 ? 'sheet exact P1 (tetrahedra)' : 'sheet exact P1', color: EXACT1_COLOR, width: 1.4 };
+      case 'nufft': return { label: `NUFFT density (refine ${P.rf})`, color: NUFFT_COLOR, width: 1.4 };
       case 'cic': return d3 ? { label: 'CIC', color: PALETTE[0], width: 3, opacity: 0.6 } : { label: 'CIC', color: PALETTE[5], width: 1.4 };
       case 'hc': return { label: 'Hopf–Cole' + hcTag, color: PALETTE[1], width: 1.4 };
       case 'hcdual': return { label: 'Hopf–Cole dual sheet' + hcTag, color: DUAL_COLOR, width: 1.4 };
@@ -164,8 +167,8 @@ export class PdfLab {
       const hc = Engine.isHcAny(m);
       if (hcOnly && !hc) continue;
       t.push({
-        label: `PDFs: ${m === 'lin' ? 'linear' : m === 'cic' ? 'CIC' : m === 'sheet' ? 'sheet' : m === 'sheetp1' ? 'sheet P1' : m === 'sheetx' ? 'sheet exact P0' : m === 'sheetxp1' ? 'sheet exact P1' : m === 'hcdual' ? 'Hopf–Cole dual sheet' : 'Hopf–Cole'}${m === 'hcz' ? ' (Zel’dovich)' : m === 'hcl' ? ' (Legendre)' : ''}`,
-        heavy: d3 && (m === 'sheet' || m === 'sheetp1' || Engine.isExact(m)) && !e.gpuActive(P),
+        label: `PDFs: ${m === 'lin' ? 'linear' : m === 'cic' ? 'CIC' : m === 'sheet' ? 'sheet' : m === 'sheetp1' ? 'sheet P1' : m === 'sheetx' ? 'sheet exact P0' : m === 'sheetxp1' ? 'sheet exact P1' : m === 'nufft' ? 'NUFFT density' : m === 'hcdual' ? 'Hopf–Cole dual sheet' : 'Hopf–Cole'}${m === 'hcz' ? ' (Zel’dovich)' : m === 'hcl' ? ' (Legendre)' : ''}`,
+        heavy: m === 'nufft' || (d3 && (m === 'sheet' || m === 'sheetp1' || Engine.isExact(m)) && !e.gpuActive(P)),
         fn: async () => {
           if ((m === 'sheet' || m === 'sheetp1') && !this.includeSheet(P)) return;
           if (Engine.isExact(m) && !this.includeExact(P)) return;
