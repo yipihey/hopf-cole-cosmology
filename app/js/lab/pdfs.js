@@ -8,7 +8,8 @@
 // (GpuCosmo3D.smoothTophat) when the GPU compute path is active.
 
 import { LinePlot, PALETTE } from '../viz/plot.js';
-import { el, numIn, fmtNum } from './dom.js';
+import { el, numIn, fmtNum, docLink } from './dom.js';
+import { BOOK } from './catalog.js';
 import { DUAL_COLOR, P1_COLOR, EXACT0_COLOR, EXACT1_COLOR, NUFFT_COLOR } from './spectra.js';
 import { Engine } from './engine.js';
 
@@ -66,9 +67,10 @@ export class PdfLab {
     this.app = app;
     const S = app.S;
     this.root = el('div', 'lab-pdfs', host);
-    el('p', 'hcc-note lab-leg-intro', this.root,
+    const intro = el('p', 'hcc-note lab-leg-intro', this.root,
       'One-point probability density of the density contrast for every method available in this mode, at two Eulerian smoothing scales: the raw grid cells, and the field smoothed with a top-hat (a sphere in 3D, a disc in 2D) of adjustable diameter. '
       + 'Histograms are of log₁₀(1+δ) in fixed bins so that the methods can be compared directly.');
+    docLink(intro, BOOK.pdfs);
     const bar = this.bar = el('div', 'hcc-controls lab-fbar', this.root);
     this.diam = numIn(bar, { label: 'diameter [cells]', value: S.pd, min: 2, max: 64, step: 1, width: '4rem',
       title: 'Diameter of the top-hat sphere (disc in 2D) in grid cells; radius = diameter / 2 cells. 2 to 64.',

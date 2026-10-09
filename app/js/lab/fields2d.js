@@ -5,7 +5,8 @@ import { SheetView } from '../viz/sheetview.js';
 import { renderColorbar, COLORMAPS } from '../viz/colormaps.js';
 import { slider, checkbox } from '../viz/ui.js';
 import { transpose2D } from '../hcc.js';
-import { el, sel, fmtNum } from './dom.js';
+import { el, sel, fmtNum, setCaption } from './dom.js';
+import { pngButton, exportPNG, pngName } from './export.js';
 import { CATALOG, KIND_ORDER, LIN_MAX, psihatRange } from './catalog.js';
 import { Engine } from './engine.js';
 
@@ -45,6 +46,7 @@ class Slot {
       this.app.runPanel(this.owner, this.idx);
     } });
     this.kindSel.el.classList.add('lab-kind');
+    this.pngBtn = pngButton(head, (b) => this.exportPNG(b));
     this.opts = el('div', 'lab-popts', root);
     this.subHost = el('span', 'lab-subhost', this.opts);
     this.cmapSel = sel(this.opts, { label: 'map', options: CMAPS, onChange: (v) => { this.save({ cmap: v }); this.redraw(); } });
@@ -56,6 +58,8 @@ class Slot {
     this.cvS = el('canvas', 'lab-cv', stage);
     this.cvS.hidden = true;
     this.bar = el('canvas', 'hcc-colorbar', wb); this.bar.width = 84; this.bar.height = 8;
+    this.cvF.setAttribute('role', 'img'); this.cvS.setAttribute('role', 'img');
+    this.bar.setAttribute('role', 'img');
     this.hover = el('div', 'lab-hover hcc-note', root, ' ');
     this.cap = el('p', 'hcc-note lab-cap', root);
     this.note = el('p', 'lab-warn-note', root); this.note.hidden = true;
@@ -68,6 +72,7 @@ class Slot {
   syncControls() {
     const { kind, def, sub, cmap, log } = this.cfg;
     this.kindSel.set(kind);
+    this.updateAria();
     this.cmapSel.set(cmap);
     this.logCb.set(log);
     this.logCb.el.hidden = def.cls !== 'density';
@@ -86,6 +91,26 @@ class Slot {
   }
 
   markStale(b) { this.root.classList.toggle('is-stale', b); }
+
+  /** Accessible names of the canvases: panel number, content, selected sub-option. */
+  updateAria() {
+    const { def, sub } = this.cfg;
+    const so = def.subs && def.subs.options.find((o) => o[0] === sub);
+    const what = `Panel ${this.idx + 1}: ` + (def.label.includes('…') ? def.label.replace('…', so ? so[1] : '').trim() : `${def.label}${so ? ` (${def.subs.label}: ${so[1]})` : ''}`);
+    this.cvF.setAttribute('aria-label', what);
+    this.cvS.setAttribute('aria-label', what);
+    this.bar.setAttribute('aria-label', `Colour scale of panel ${this.idx + 1}${def.unit ? ': ' + def.unit : ''}`);
+    this.pngBtn.setAttribute('aria-label', `Download panel ${this.idx + 1} as PNG`);
+  }
+
+  /** PNG of the stage and the colour bar; the visible view is redrawn synchronously first (WebGPU canvases do not keep their buffer). */
+  exportPNG(btn) {
+    const gpuSheet = !this.cvS.hidden && this.sv;
+    const view = gpuSheet ? this.sv : this.fv;
+    if (!view) return Promise.resolve(null);
+    const { kind, sub } = this.cfg;
+    return exportPNG({ canvas: gpuSheet ? this.cvS : this.cvF, bar: this.bar, redraw: () => view.draw() }, pngName(kind, sub, this.app.P.D), btn);
+  }
 
   /** True when the panel shows something derived from the Hopf-Cole solution (recomputed by the fast nu path). */
   dependsOnHc() {
@@ -127,7 +152,8 @@ class Slot {
       let { kind, def, sub, cmap, log } = this.cfg;
       this.syncHidden(def);
       const opt = this.cfg.opt;
-      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG[def.cpu] : def).caption(sub, P, eng, opt);
+      this.updateAria();
+      setCaption(this.cap, (def.gpu && !this.app.gpu ? CATALOG[def.cpu] : def).caption(sub, P, eng, opt), def);
       this.note.hidden = true;
       const n = eng.n;
       if (def.gpu && this.app.gpu) {
@@ -151,7 +177,7 @@ class Slot {
       const needF = def.need || (((def.fourier || def.sf) && Engine.isExact(sub)) ? sub : null);
       if (needF) await eng.need('field', needF, P);
       const arr = drawDef.data(eng, P, sub, opt);
-      if (needF) this.cap.textContent = def.caption(sub, P, eng, opt);
+      if (needF) setCaption(this.cap, def.caption(sub, P, eng, opt), def);
       if (!arr || arr.length < n * n) throw new Error(`panel data has ${arr ? arr.length : 0} values, expected ${n * n}`);
       fv.setField(transpose2D(arr, n), n, n);
       fv.setColormap(cmap);

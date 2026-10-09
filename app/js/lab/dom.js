@@ -61,3 +61,18 @@ export function fmtNum(v, d = 3) {
   if (v !== 0 && (Math.abs(v) < 1e-3 || Math.abs(v) >= 1e5)) return v.toExponential(2);
   return String(Number(v.toPrecision(d)));
 }
+
+/** Append the short "§ book" back-link (opens the explaining section of the book in a new tab). ref = {doc, docTitle}. */
+export function docLink(parent, ref) {
+  if (!ref || !ref.doc) return null;
+  const a = el('a', 'lab-doc', parent, '§ book');
+  a.href = ref.doc; a.target = '_blank'; a.rel = 'noopener';
+  a.title = ref.docTitle || 'Open the explaining section of the book';
+  return a;
+}
+
+/** Set a caption paragraph: text followed by the "§ book" link. */
+export function setCaption(p, text, ref) {
+  p.textContent = text;
+  if (ref && ref.doc) { p.appendChild(document.createTextNode(' ')); docLink(p, ref); }
+}

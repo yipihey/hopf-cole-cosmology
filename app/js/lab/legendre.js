@@ -12,7 +12,8 @@ import { renderColorbar } from '../viz/colormaps.js';
 import { LinePlot, PALETTE } from '../viz/plot.js';
 import { slider, readout } from '../viz/ui.js';
 import { transpose2D, slice3D, percentiles } from '../hcc.js';
-import { el, sel, fmtNum } from './dom.js';
+import { el, sel, fmtNum, docLink } from './dom.js';
+import { BOOK } from './catalog.js';
 import { Engine } from './engine.js';
 import { DUAL_COLOR, P1_COLOR, EXACT0_COLOR, EXACT1_COLOR, NUFFT_COLOR } from './spectra.js';
 
@@ -36,6 +37,8 @@ class Panel {
     this.stage = el('div', 'hcc-stage', wb);
     this.cv = el('canvas', 'lab-cv', this.stage);
     this.bar = el('canvas', 'hcc-colorbar', wb); this.bar.width = 84; this.bar.height = 8;
+    this.cv.setAttribute('role', 'img'); this.cv.setAttribute('aria-label', title);
+    this.bar.setAttribute('role', 'img'); this.bar.setAttribute('aria-label', 'Colour scale of: ' + title);
     this.hover = el('div', 'lab-hover hcc-note', this.root, ' ');
     this.cap = el('p', 'hcc-note lab-cap', this.root);
     this.fv = null;
@@ -79,10 +82,11 @@ export class LegendreLab {
     this.app = app;
     const S = app.S;
     this.root = el('div', 'lab-legendre', host);
-    el('p', 'hcc-note lab-leg-intro', this.root,
+    const intro = el('p', 'hcc-note lab-leg-intro', this.root,
       'Does the Hopf–Cole machinery reproduce the exact nLPT density? The Legendre transform inverts any gradient Lagrangian map x = q + ∇S(q): '
       + 'the inverse is the gradient of the Legendre transform of q²/2 + S(q), and the Eulerian density is det(I − ∇∇Φ). '
       + 'The sheet below is the multi-stream reference; the choice of source potential (Dynamics → HC source ϕ) sets the transverse treatment.');
+    docLink(intro, BOOK.legendre);
 
     // ---- toolbar
     const bar = this.bar = el('div', 'hcc-controls lab-fbar', this.root);

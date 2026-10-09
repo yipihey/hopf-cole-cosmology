@@ -40,9 +40,8 @@ motivated the format is `docs/format-audit.md`.
 4. **Cite** only after verifying the reference in ADS (or the field's index);
    keep volume, pages, DOI or bibcode in the `.bib` entry.
 5. **Link the lab**: a "Try it" callout ending in `{{< lab "hash" "label" >}}`
-   whose hash reproduces the experiment (use the schema keys; lists are
-   comma-separated and URL-encoded as `%2C`; slots are `kind.sub.cmap.flag`
-   joined by `_`). Add the experiment to `presets.js` and the lab guide.
+   whose hash reproduces the experiment (use the schema keys; lists and vectors are joined with `_`, e.g.
+   `se=lin_sheet_hc`, `k2=3_0_0`; slots are `kind.sub.cmap.flag` joined by `_`). Add the experiment to `presets.js` and the lab guide.
 6. **Explain in the app**: a note in `explain.js`, a caption with a `doc`
    back-link in `catalog.js`, a row in the lab-guide table.
 7. **Update the notation appendix** if a symbol or convention is new.

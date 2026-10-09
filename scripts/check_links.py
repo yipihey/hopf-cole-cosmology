@@ -38,6 +38,8 @@ for qmd in sorted(glob.glob(str(ROOT / "chapters" / "*.qmd")) + [str(ROOT / "ind
         if not re.search(rf"fn\s+{m.group(1)}\s*\(", tests_src):
             print(f"{qmd}: test {m.group(1)} not found in core/tests"); bad += 1
     for m in re.finditer(r"\{\{<\s*lab\s+\"([^\"]*)\"", text):
+        if "%2C" in m.group(1) or "," in m.group(1):
+            print(f"{qmd}: lab hash {m.group(1)!r} uses commas; lists are joined with '_'"); bad += 1
         for kv in m.group(1).split("&"):
             if kv and kv.split("=")[0] not in keys:
                 print(f"{qmd}: lab hash key {kv.split('=')[0]!r} is not in the state schema"); bad += 1

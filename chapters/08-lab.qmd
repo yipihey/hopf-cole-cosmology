@@ -50,7 +50,11 @@ $y$ axis strip it zooms that axis only), dragging pans, a double click
 resets, and the small toolbar under each plot switches either axis between
 linear and logarithmic scaling and accepts typed axis ranges. A zoomed view
 persists while the data change, so one can watch a feature at fixed axes
-while dragging $D$.
+while dragging $D$. Every plot downloads as SVG or CSV from that toolbar,
+every field panel as PNG from its header, and the *copy link* button in the
+"Show" row copies the address of the current state: the part after `#`
+encodes every control, so the link reproduces the experiment exactly. The
+*experiments* menu next to it loads the named experiments of this guide.
 
 | Group | Control | Meaning |
 |---|---|---|
@@ -100,7 +104,7 @@ while dragging $D$.
    measured $P(k)$ departs from linear theory at high $k$; the 1-loop curve
    follows it up to some $k$; the EFT counterterm extends the agreement.
    Now change $R$: the loop prediction and the fitted $c_s^2$ move together.
-   {{< lab "o=4&D=0.3&v=s&se=lin%2Csheetp1%2Cspt%2Ceft%2Cp22%2Cp13" "Open" >}}
+   {{< lab "o=4&D=0.3&v=s&se=lin_sheetp1_spt_eft_p22_p13" "Open" >}}
 6. **Legendre.** Open the Legendre lab, order 2, $D < D_{\rm sc}$: the
    $n$LPT-potential density differs from the sheet only by the rasterization
    noise (shrinking with $N$), while the Zel'dovich Hopf–Cole density differs by

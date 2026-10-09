@@ -18,7 +18,10 @@ import { LegendreLab } from './legendre.js';
 import { PdfLab } from './pdfs.js';
 import { KernelLab } from './kernels.js';
 import { buildExplain } from './explain.js';
-import { el, tick, paint, fmtMs } from './dom.js';
+import { el, sel, tick, paint, fmtMs } from './dom.js';
+import { PRESETS } from './presets.js';
+import { copyText } from './export.js';
+import { flash } from '../viz/download.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -267,10 +270,14 @@ export class Lab {
 
   hashChanged() {
     clearTimeout(this.timers.hash);
-    this.timers.hash = setTimeout(() => {
-      const h = encodeHash(this.S);
-      try { history.replaceState(null, '', location.pathname + location.search + (h ? '#' + h : '')); } catch (e) { /* sandboxed */ }
-    }, 350);
+    this.timers.hash = setTimeout(() => this.writeHash(), 350);
+  }
+
+  /** Write the current state into the URL now (the debounced hashChanged() does this after 350 ms). */
+  writeHash() {
+    clearTimeout(this.timers.hash);
+    const h = encodeHash(this.S);
+    try { history.replaceState(null, '', location.pathname + location.search + (h ? '#' + h : '')); } catch (e) { /* sandboxed */ }
   }
 
   setStatus(text, kind = '') {
@@ -452,6 +459,32 @@ export class Lab {
         if (cb.checked && this.eng.sim && (k === 'f' || k === 's' || k === 'l' || k === 'p' || k === 'k')) this.runSection(k);
       });
     }
+    this.buildShareTools(host);
+  }
+
+  /** Right end of the "Show:" row: named experiments (loaded through the URL hash) and "copy link" (the hash encodes the whole state). */
+  buildShareTools(host) {
+    const box = el('span', 'lab-share', host);
+    const ps = this.presetSel = sel(box, { options: [['', 'experiments …'], ...PRESETS.map((p) => [p.id, p.title])], value: '',
+      title: 'Load a named experiment from the lab guide (replaces the current settings; use the browser’s back button to return).',
+      onChange: (id) => {
+        const p = PRESETS.find((q) => q.id === id);
+        ps.set('');                                    // back to the placeholder: the select never shows a stale choice
+        if (!p) return;
+        this.writeHash();
+        location.hash = '#' + p.hash;                  // hashchange handler (constructor) reloads when it differs from the current state
+      } });
+    ps.select.setAttribute('aria-label', 'Named experiments');
+    ps.select.classList.add('lab-presets');
+    Array.from(ps.select.options).forEach((o) => { const p = PRESETS.find((q) => q.id === o.value); if (p) o.title = p.note; });
+    const b = this.copyBtn = el('button', 'hcc-btn lab-copy', box, 'copy link');
+    b.type = 'button';
+    b.title = 'Copy the URL of this exact experiment (the hash encodes the whole state) to the clipboard.';
+    b.addEventListener('click', async () => {
+      this.writeHash();
+      const ok = await copyText(location.href);
+      flash(b, ok ? 'copied' : 'copy failed', ok ? 1000 : 1800);
+    });
   }
   applyVisibility() {
     const v = this.S.vis;

@@ -3,7 +3,8 @@
 import { LinePlot, PALETTE } from '../viz/plot.js';
 import { slider, checkbox, readout } from '../viz/ui.js';
 import { fitCounterterm } from '../hcc.js';
-import { el, sel, fmtNum } from './dom.js';
+import { el, sel, fmtNum, docLink } from './dom.js';
+import { BOOK } from './catalog.js';
 
 export const DUAL_COLOR = '#6a3d9a';
 export const P1_COLOR = '#a0522d';
@@ -41,6 +42,9 @@ export class Spectra {
     this.app = app;
     const S = app.S;
     this.root = el('div', 'lab-spectra', host);
+    const intro = el('p', 'hcc-note lab-leg-intro', this.root,
+      'Power spectra of the selected density estimators against linear theory and the one-loop predictions, their cross-correlation r(k) with the linear field, and the distribution of Fourier phase sums.');
+    docLink(intro, BOOK.pk);
     const grid = el('div', 'lab-plots-grid', this.root);
 
     // ---- P(k) panel
@@ -74,14 +78,16 @@ export class Spectra {
     this.dirCap = el('p', 'hcc-note lab-cap', pp, 'Direct sheet spectrum (P0 = constant, P1 = linear density per simplex): exact Fourier transform of the piecewise-linear sheet, sampled on lattice modes; no grid, no window, no aliasing — the k⁻³ facet tail is real.');
     this.nufftCap = el('p', 'hcc-note lab-cap', pp, 'NUFFT density: Lagrangian integral ∫d^dq e^{−ik·x(q)} of the Fourier-refined map by the periodic trapezoidal rule (type-1 NUFFT, Gaussian kernel, 2× oversampling); spectrally accurate for a band-limited displacement, counts all streams, no facets.');
     this.dirCap.hidden = true; this.nufftCap.hidden = true;
-    el('p', 'hcc-note lab-cap', pp, 'Dashed vertical lines mark k_Nyq and the smoothing scale 1/R. The P1 sheet interpolates the vertex densities 1/|J| linearly inside every simplex (mass-conserving, second-order accurate), so it carries less high-k rasterization noise than the plain sheet. The exact sheet deposits clip every simplex against the cells it overlaps and integrate its (constant or vertex-interpolated) density over each piece: no sampling noise, mass conserved to roundoff, so their raw spectra sit below the point-sampled ones at high k, where only the facet structure of the simplices remains. The Hopf–Cole dual sheet is the mass-conserving density of the same inverse map (cell mass = Lagrangian volume of the cell’s preimage). Cell-averaged estimators (exact deposits, dual sheet) are divided by the top-hat window Π sinc²(k_aΔx/2); point-sampled sheets and the NUFFT/direct spectra carry no window. Linear theory is the smooth curve D²P0(k); the 1-loop curves are only available for Gaussian ICs. The EFT curve subtracts 2c_s²k²P_lin from the SPT 1-loop with c_s² fitted to the measured spectrum for k < k_max.');
+    const pkCap = el('p', 'hcc-note lab-cap', pp, 'Dashed vertical lines mark k_Nyq and the smoothing scale 1/R. The P1 sheet interpolates the vertex densities 1/|J| linearly inside every simplex (mass-conserving, second-order accurate), so it carries less high-k rasterization noise than the plain sheet. The exact sheet deposits clip every simplex against the cells it overlaps and integrate its (constant or vertex-interpolated) density over each piece: no sampling noise, mass conserved to roundoff, so their raw spectra sit below the point-sampled ones at high k, where only the facet structure of the simplices remains. The Hopf–Cole dual sheet is the mass-conserving density of the same inverse map (cell mass = Lagrangian volume of the cell’s preimage). Cell-averaged estimators (exact deposits, dual sheet) are divided by the top-hat window Π sinc²(k_aΔx/2); point-sampled sheets and the NUFFT/direct spectra carry no window. Linear theory is the smooth curve D²P0(k); the 1-loop curves are only available for Gaussian ICs. The EFT curve subtracts 2c_s²k²P_lin from the SPT 1-loop with c_s² fitted to the measured spectrum for k < k_max.');
+    pkCap.appendChild(document.createTextNode(' ')); docLink(pkCap, BOOK.eft);
 
     // ---- r(k) panel
     const rp = this.rPanel = el('div', 'hcc-panel lab-panel', grid);
     el('div', 'hcc-title', rp, 'Cross-correlation with the linear field r(k)');
     this.rHost = el('div', 'lab-plot', rp);
     this.rPlot = new LinePlot(this.rHost, { width: 500, height: 380 });
-    el('p', 'hcc-note lab-cap', rp, 'r(k) = P_{f,lin} / √(P_f P_lin) measures how much of the evolved field’s phase information still matches linear theory. The dashed curve is the Zel’dovich propagator exp(−k²σ_Ψ²D²/2), with σ_Ψ² the per-axis displacement variance of the grid modes (Gaussian ICs only). It equals r(k) only while the evolved power is still close to linear, and is only approximate once streams cross.');
+    const rCap = el('p', 'hcc-note lab-cap', rp, 'r(k) = P_{f,lin} / √(P_f P_lin) measures how much of the evolved field’s phase information still matches linear theory. The dashed curve is the Zel’dovich propagator exp(−k²σ_Ψ²D²/2), with σ_Ψ² the per-axis displacement variance of the grid modes (Gaussian ICs only). It equals r(k) only while the evolved power is still close to linear, and is only approximate once streams cross.');
+    rCap.appendChild(document.createTextNode(' ')); docLink(rCap, BOOK.phases);
 
     // ---- phase sums panel
     const hp = this.phPanel = el('div', 'hcc-panel lab-panel', grid);
@@ -96,7 +102,8 @@ export class Spectra {
     this.phHost = el('div', 'lab-plot', hp);
     this.phPlot = new LinePlot(this.phHost, { width: 500, height: 380 });
     this.phVals = el('div', 'hcc-note lab-phvals', hp);
-    el('p', 'hcc-note lab-cap', hp, 'Distribution of the phase sum θ = φ(k₁) + φ(k₂) − φ(k₁+k₂) over random closed triangles with all sides below the chosen k_max, shown as 2π p(θ): a Gaussian field gives the dotted line at 1 (⟨cos θ⟩ = 0), while phase-locked structure (the harmonics of a wave, pancakes, nodes) piles up at θ = 0 and raises ⟨cos θ⟩.');
+    const hCap = el('p', 'hcc-note lab-cap', hp, 'Distribution of the phase sum θ = φ(k₁) + φ(k₂) − φ(k₁+k₂) over random closed triangles with all sides below the chosen k_max, shown as 2π p(θ): a Gaussian field gives the dotted line at 1 (⟨cos θ⟩ = 0), while phase-locked structure (the harmonics of a wave, pancakes, nodes) piles up at θ = 0 and raises ⟨cos θ⟩.');
+    hCap.appendChild(document.createTextNode(' ')); docLink(hCap, BOOK.phases);
 
     // ---- readouts
     const ro = this.roRow = el('div', 'hcc-controls lab-readouts', this.root);

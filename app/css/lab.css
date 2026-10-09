@@ -167,3 +167,17 @@ html { color-scheme: light dark; }
 .lab-phvals { display: flex; flex-wrap: wrap; gap: 0.15rem 1.1rem; margin-top: 0.3rem; font-variant-numeric: tabular-nums; }
 .lab-phval { display: inline-flex; align-items: center; gap: 0.35rem; }
 .lab-phsw { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 2px; }
+
+/* sharing and export: presets select, copy link, png buttons, back-links */
+.lab-share { margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.lab-share .hcc-select { margin: 0; }
+.lab-share select.lab-presets { max-width: 17rem; }
+.lab-copy, .lab-png { flex: 0 0 auto; padding: 0.05rem 0.5rem; font-size: 0.75rem; white-space: nowrap; }
+.lab-copy { min-width: 4.8rem; }
+.lab-ph .lab-png { margin-left: auto; }
+a.lab-doc { white-space: nowrap; font-size: 0.85em; text-decoration: none; border-bottom: 1px dotted currentColor; }
+a.lab-doc:hover { text-decoration: none; border-bottom-style: solid; }
+/* svg / csv export buttons of the plot toolbar: only the reset button signals a changed view */
+.hcc-plot-tools .hcc-pt-export { display: inline-flex; gap: 0.25rem; }
+.hcc-plot-tools.is-changed .hcc-pt-export .hcc-pt-btn:last-of-type { border-color: var(--hcc-border); color: inherit; }
+.hcc-plot-tools.is-changed .hcc-pt-export .hcc-pt-btn:last-of-type:hover { border-color: var(--hcc-accent, #0072B2); color: var(--hcc-accent, #0072B2); }

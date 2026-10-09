@@ -12,7 +12,8 @@
 // not invalidate anything (nothing in the lab reads the sim's "last Hopf-Cole run" lazily).
 
 import { LinePlot, PALETTE } from '../viz/plot.js';
-import { el, sel, fmtNum, tick } from './dom.js';
+import { el, sel, fmtNum, tick, docLink } from './dom.js';
+import { BOOK } from './catalog.js';
 import { P1_COLOR } from './spectra.js';
 
 const cmul = (a, b) => [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]];
@@ -43,11 +44,12 @@ export class KernelLab {
     this.app = app;
     const S = app.S;
     this.root = el('div', 'lab-kernels', host);
-    el('p', 'hcc-note lab-leg-intro', this.root,
+    const intro = el('p', 'hcc-note lab-leg-intro', this.root,
       'The two-plane-wave kernel check. For δ₀ = A₁cos(k₁·x+φ₁) + A₂cos(k₂·x+φ₂) the second-order density has harmonics at k₁±k₂, 2k₁ and 2k₂ whose amplitude, divided by '
       + 'D²c₀(k₁)c₀(k₂) (times the multiplicity), is the mode-coupling kernel F₂ of the dynamics. The table measures it (the complex amplitudes are taken from the fields themselves) '
       + 'for the Hopf–Cole density and for the sheet, and compares with the viscous kernel F₂^ν of the adhesion model, the Zel’dovich kernel F₂^ZA and the gravitational kernel F₂. '
       + 'Valid for D well below the shell-crossing time, where the third and higher orders (relative size ∝ D²) are small.');
+    docLink(intro, BOOK.kernels);
     this.noIc = el('div', 'lab-kern-noic', this.root);
     el('p', 'hcc-note', this.noIc, 'The kernel check needs the two-plane-wave initial condition.');
     const b = el('button', 'hcc-btn', this.noIc, 'Switch to two plane waves'); b.type = 'button';

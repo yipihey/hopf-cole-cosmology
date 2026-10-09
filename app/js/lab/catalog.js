@@ -8,6 +8,34 @@ export const LIN_MAX = 5;       // upper colour limit for non-log density maps
 const SUB_OF = [['sheet', 'sheet'], ['sheetp1', 'sheet (P1)'], ['sheetx', 'sheet (exact P0)'], ['sheetxp1', 'sheet (exact P1)'], ['nufft', 'NUFFT density'], ['cic', 'CIC'], ['hc', 'Hopf–Cole'], ['hcdual', 'Hopf–Cole dual sheet'], ['lin', 'linear']];
 const OF_NAME = { sheet: 'sheet', sheetp1: 'P1 sheet', sheetx: 'exact P0 sheet', sheetxp1: 'exact P1 sheet', nufft: 'NUFFT', cic: 'CIC', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' };
 
+// Back-links to the book: `doc` is the URL of the explaining section relative to app/index.html, `docTitle` the tooltip.
+const CHAPTER = {
+  '04-two-spaces': 'One solution, two spaces: kernels and multipliers',
+  '05-zeldovich': 'From Burgers to cosmology: Zel’dovich and the adhesion model',
+  '06-lpt': 'Lagrangian perturbation theory to fourth order',
+  '07-mode-coupling': 'Mode coupling, power spectra and the EFT of large-scale structure',
+};
+const book = (file, id, section) => ({ doc: `../chapters/${file}.html#${id}`, docTitle: `${CHAPTER[file]} — ${section}` });
+export const BOOK = {
+  sheet: book('05-zeldovich', 'cold-matter-as-a-sheet', 'Cold matter as a sheet'),
+  density: book('06-lpt', 'from-the-series-to-a-density', 'From the series to a density'),
+  nufft: book('07-mode-coupling', 'measuring-the-spectrum-without-a-grid', 'Measuring the spectrum without a grid'),
+  hc: book('05-zeldovich', 'adhesion-switching-the-viscosity-back-on', 'Adhesion: switching the viscosity back on'),
+  dual: book('05-zeldovich', 'the-dual-sheet-a-mass-conserving-density-from-the-inverse-map', 'The dual sheet: a mass-conserving density from the inverse map'),
+  legendre: book('05-zeldovich', 'sec-legendre', 'Hopf–Cole is a Legendre transform'),
+  linear: book('05-zeldovich', 'linear-theory-and-the-choice-of-clock', 'Linear theory and the choice of clock'),
+  psi: book('05-zeldovich', 'linear-in-psi-nonlinear-in-delta', 'Linear in ψ, nonlinear in δ'),
+  lagr: book('06-lpt', 'the-equations-in-lagrangian-form', 'The equations in Lagrangian form'),
+  twoSpaces: book('04-two-spaces', 'where-did-the-mode-coupling-go', 'Where did the mode coupling go?'),
+  phases: book('07-mode-coupling', 'phases-propagators-and-the-cosmic-web', 'Phases, propagators and the cosmic web'),
+  pk: book('07-mode-coupling', 'the-power-spectrum-at-one-loop', 'The power spectrum at one loop'),
+  eft: book('07-mode-coupling', 'sensitivity-to-the-cutoff-and-the-eft-counterterm', 'Sensitivity to the cutoff and the EFT counterterm'),
+  kernels: book('07-mode-coupling', 'sec-viscous-kernels', 'Viscous kernels: perturbation theory for the adhesion model'),
+  pdfs: book('07-mode-coupling', 'the-one-point-distribution', 'The one-point distribution'),
+};
+/** Book section for the density estimators offered in the 3D panels and the Fourier-map selectors (keys of SUB_OF). */
+export const FIELD_BOOK = { sheet: BOOK.density, sheetp1: BOOK.density, sheetx: BOOK.density, sheetxp1: BOOK.density, nufft: BOOK.nufft, cic: BOOK.density, hc: BOOK.hc, hcdual: BOOK.dual, lin: BOOK.linear };
+
 /** Shift the raw FFT-ordered n×n map [ikx*n+iky] so that k = 0 sits at the centre. */
 export function fftshift2D(a, n) {
   const out = new Float32Array(n * n), h = n >> 1;
@@ -35,48 +63,57 @@ export function exactNote(e, which) {
  */
 export const CATALOG = {
   sheetgpu: {
+    ...BOOK.sheet,
     label: 'Sheet density (GPU, additive triangles)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', gpu: true,
     subs: { label: 'draw', options: [['density', 'density'], ['wire', 'wire'], ['both', 'both']], def: 'both' },
     caption: () => 'The Lagrangian grid x(q,D) = q + ΣDⁿΨ⁽ⁿ⁾(q) drawn as triangles whose mass is spread over their image and added: folded, multi-stream regions accumulate. “wire” shows the deformed grid; folds appear after shell crossing.',
     cpu: 'sheetcpu',
   },
   sheetp1gpu: {
+    ...BOOK.density,
     label: 'Sheet density (GPU, P1 vertex-interpolated)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', gpu: true, p1: true,
     subs: { label: 'draw', options: [['density', 'density'], ['wire', 'wire'], ['both', 'both']], def: 'density' },
     caption: () => 'The same additive triangles, but the density inside each triangle varies linearly between the vertex values 1/|J| (barycentric interpolation, rescaled so that every triangle still deposits exactly its mass): no per-triangle facets, mass conserved, second-order accurate.',
     cpu: 'sheetp1cpu',
   },
   sheetp1cpu: {
+    ...BOOK.density,
     label: 'Sheet density (P1, CPU rasterized)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
     data: (e, P) => e.sheetP1(P),
     caption: () => 'P1 sheet: Σ over streams of the vertex-interpolated density (linear between the vertex values 1/|J| inside each triangle, normalised to the triangle mass), point-sampled with 2×2 supersampling in the Rust core.',
   },
   sheetcpu: {
+    ...BOOK.sheet,
     label: 'Sheet density (CPU rasterized)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
     data: (e, P) => e.sheet(P),
     caption: () => 'Exact sheet density Σ 1/|J| over all streams, point-sampled with 2×2 supersampling in the Rust core. Same quantity as the GPU panel.',
   },
   sheetx: {
+    ...BOOK.density,
     label: 'Sheet density (exact P0)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', need: 'sheetx',
     data: (e, P) => e.sheetExact(P, false),
     caption: (sub, P, e) => 'Every simplex is clipped against the cells it overlaps and deposits the exact integral of its (constant) density; no sampling noise, mass conserved to roundoff.' + exactNote(e, 'sheetx'),
   },
   sheetxp1: {
+    ...BOOK.density,
     label: 'Sheet density (exact P1)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', need: 'sheetxp1',
     data: (e, P) => e.sheetExact(P, true),
     caption: (sub, P, e) => 'Every simplex is clipped against the cells it overlaps and deposits the exact integral of its vertex-interpolated (linear) density profile; no sampling noise, mass conserved to roundoff.' + exactNote(e, 'sheetxp1'),
   },
   nufft: {
+    ...BOOK.nufft,
     label: 'NUFFT density (refined map)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄', avail: true,
     data: (e, P) => e.nufft(P),
     caption: (sub, P) => `Lagrangian integral ∫d^dq e^{−ik·x(q)} of the Fourier-refined map by the periodic trapezoidal rule (type-1 NUFFT, Gaussian kernel, 2× oversampling); spectrally accurate for a band-limited displacement, counts all streams, no facets.${P && P.rf ? ` The displacement is Fourier-interpolated to ${P.rf}× the Lagrangian grid before the rule is applied (refine ${P.rf}), then the density is returned on the ${P.n} grid. WASM; about 1 s at 256² with refine 2.` : ''}`,
   },
   cic: {
+    ...BOOK.density,
     label: 'CIC density', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
     data: (e, P) => e.cic(P),
     caption: () => 'Cloud-in-cell deposit of the N² displaced particles: the usual N-body estimate. Noisier than the sheet and blurred by the CIC window.',
   },
   hc: {
+    ...BOOK.hc,
     label: 'Hopf–Cole density', cls: 'density', cmap: 'magma', log: true, unit: '1+δ',
     data: (e, P) => fmap(e.hc(P).delta, (v) => v + 1),
     caption: (sub, P) => (P && P.hs && P.hs !== 'zel' && P.order > 1
@@ -84,55 +121,65 @@ export const CATALOG = {
       : '1+δ = det(I − D∇∇Φ_v) from the viscous-Burgers (adhesion) solution obtained with the Hopf–Cole transform. Before shell crossing it equals the Zel’dovich sheet; afterwards mass sticks into shocks of width ~√(νD).'),
   },
   hcdual: {
+    ...BOOK.dual,
     label: 'Hopf–Cole dual sheet (mass-conserving)', cls: 'density', cmap: 'magma', log: true, unit: 'ρ/ρ̄',
     data: (e, P) => e.dualRho(P),
     caption: () => 'The mass of an Eulerian cell is the Lagrangian volume of its preimage under the Hopf–Cole inverse map q(x) = x − D∇Φ_v (the polygon spanned by q at the cell’s corners), so mass is conserved exactly and peaks are not under-resolved by finite-difference Hessians; before shell crossing it should beat both the finite-difference Hopf–Cole density (in peaks) and the forward sheet (in voids).',
   },
   lin: {
+    ...BOOK.linear,
     label: 'Linear density D δ0', cls: 'sym', cmap: 'rdbu', unit: 'δ_lin',
     data: (e, P) => e.linear(P),
     caption: () => 'Linear theory δ_lin = D δ0 (signed, mean 0). Gaussian, with no caustics or voids; the reference for the cross-correlation r(k).',
   },
   phi: {
+    ...BOOK.psi,
     label: 'Velocity potential Φ_v (Hopf–Cole)', cls: 'sym', cmap: 'rdbu', unit: 'Φ_v',
     data: (e, P) => { const f = e.hc(P).phi; const m = mean(f); return fmap(f, (v) => v - m); },
     caption: () => 'Φ_v(x,D) = −2ν ln ψ with velocity u = ∇Φ_v (mean removed). As ν→0 it is the Hopf–Lax minimum over Lagrangian positions, with kinks where shocks form.',
   },
   lnpsi: {
+    ...BOOK.psi,
     label: 'ln ψ', cls: 'auto', cmap: 'viridis', unit: 'ln ψ − max',
     data: (e, P) => { const f = e.hc(P).lnpsi; const m = minmax(f)[1]; return fmap(f, (v) => v - m); },
     caption: () => 'ln ψ with ψ = exp(−Φ_v/2ν), which obeys the linear heat equation ∂_Dψ = ν∇²ψ. Its dynamic range (Φmax − Φmin)/2ν is why the naive Fourier solution fails at small ν.',
   },
   invj: {
+    ...BOOK.density,
     label: 'Lagrangian 1/J', cls: 'density', cmap: 'magma', log: true, unit: '1/J', lagr: true,
     data: (e, P) => fmap(e.jacobian(P), (j) => (j > 1e-6 ? 1 / j : 1e6)),
     caption: () => 'Density carried by each fluid element, 1/J(q) with J = det ∂x/∂q at the chosen LPT order, plotted at its initial position q. Elements with J ≤ 0 have shell-crossed (shown at maximum).',
   },
   lptsrc: {
+    ...BOOK.lagr,
     label: 'LPT source ∇·Ψ⁽ⁿ⁾', cls: 'sym', cmap: 'rdbu', unit: '∇·Ψ', lagr: true,
     subs: { label: 'n', options: [['1', '1'], ['2', '2'], ['3', '3'], ['4', '4']], def: '2' },
     data: (e, P, sub) => e.div(P, Number(sub)),
     caption: (sub) => `Longitudinal source ∇·Ψ⁽${sub}⁾ of the order-${sub} displacement on the Lagrangian grid` + (sub === '1' ? ' (equal to −δ0).' : ', built recursively from products of lower-order displacement gradients (μ₂, μ₃ invariants).'),
   },
   lptcurl: {
+    ...BOOK.lagr,
     label: 'LPT curl source (n≥3)', cls: 'sym', cmap: 'rdbu', unit: '(∇×Ψ)_z', lagr: true,
     subs: { label: 'n', options: [['3', '3'], ['4', '4']], def: '3' },
     data: (e, P, sub) => e.curl(P, Number(sub)),
     caption: (sub) => `Transverse part (∇×Ψ⁽${sub}⁾)_z, the z-component in 2D. Displacements of first and second order are curl-free; vorticity of the Lagrangian map first appears at third order.`,
   },
   fabs: {
+    ...BOOK.phases,
     label: '|δ̂(k)| of …', cls: 'amp', cmap: 'viridis', unit: 'log₁₀|δ̂|/max', fourier: true,
     subs: { label: 'of', options: SUB_OF, def: 'sheet' },
     data: (e, P, sub) => e.fmaps(sub, P).amp,
     caption: (sub) => `log₁₀|δ̂(k)|/max of the ${OF_NAME[sub] || sub} density; k_x horizontal, k_y vertical, k = 0 at the centre. Nonlinear evolution fills in new modes: harmonics and sums/differences of the linear ones.`,
   },
   fphase: {
+    ...BOOK.phases,
     label: 'phase of δ̂(k) of …', cls: 'phase', cmap: 'twilight', unit: 'arg δ̂ [rad]', fourier: true,
     subs: { label: 'of', options: SUB_OF, def: 'sheet' },
     data: (e, P, sub) => e.fmaps(sub, P).phase,
     caption: (sub) => `Phase arg δ̂(k) of the ${OF_NAME[sub] || sub} density. Linear growth leaves the initial phases untouched; mode coupling makes the phases of generated modes depend on those of their parents.`,
   },
   fphaseonly: {
+    ...BOOK.phases,
     label: 'phase-only reconstruction of …', cls: 'phaseonly', cmap: 'rdbu', unit: 'phase-only map [rms]', sf: true,
     subs: { label: 'of', options: SUB_OF, def: 'sheet' },
     opt: { label: 'k_max', title: 'Keep only the phases of the modes with |k| ≤ k_max (in units of the fundamental k_f = 2π/L); all = every mode.', options: [['', 'all modes'], ['2', '2 k_f'], ['4', '4 k_f'], ['8', '8 k_f'], ['16', '16 k_f'], ['32', '32 k_f']], def: '' },
@@ -140,11 +187,13 @@ export const CATALOG = {
     caption: (sub, P, e, opt) => `Phase-only reconstruction of the ${OF_NAME[sub] || sub} density (Oppenheim & Lim 1981; Chiang & Coles 2000): every Fourier mode${Number(opt) > 0 ? ' with 0 < |k| ≤ ' + opt + ' k_f' : ''} is replaced by its unit phasor e^{iφ(k)} and transformed back, so the power spectrum is discarded and only the phases remain. Linear colour scale, ±3 rms (the map has unit rms; its overall sign is arbitrary). It peaks on the sharp structures of the field: pancakes, filaments and nodes, i.e. the skeleton of the web.`,
   },
   psihat: {
+    ...BOOK.twoSpaces,
     label: '|ψ̂(k)|', cls: 'psihat', cmap: 'viridis', unit: 'log₁₀|ψ̂|/max', fourier: true,
     data: (e, P) => e.hc(P).psihat, // already fft-shifted [ikx*n+iky]
     caption: () => 'log₁₀|ψ̂(k)|/max of ψ = exp(−Φ_v/2ν) at time D (heat-equation solution). The multiplier exp(−νk²D) acts here; the floor of this map shows the numerical dynamic range.',
   },
   speed: {
+    ...BOOK.hc,
     label: 'Speed |u| (Hopf–Cole)', cls: 'auto', cmap: 'viridis', unit: '|u|',
     data: (e, P) => { const v = e.hc(P).vel, n2 = v.length / 2, o = new Float32Array(n2); for (let i = 0; i < n2; i++) o[i] = Math.hypot(v[2 * i], v[2 * i + 1]); return o; },
     caption: () => 'Speed |u| = |∇Φ_v| of the Burgers flow. In the adhesion picture matter streams along u until it hits a shock.',

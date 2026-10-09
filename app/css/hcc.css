@@ -51,7 +51,7 @@
 .hcc-plot-tools .hcc-pt-in { font: inherit; width: 4.6em; padding: 0 0.2rem; border: 1px solid var(--hcc-border); border-radius: 3px; background: transparent; color: inherit; text-align: right; }
 .hcc-plot-tools .hcc-pt-dash { opacity: 0.6; }
 .hcc-plot-tools .hcc-pt-readout { margin-left: auto; font-variant-numeric: tabular-nums; min-width: 9em; text-align: right; }
-.hcc-plot-tools.is-changed .hcc-pt-btn:last-of-type { border-color: var(--hcc-accent, #0072B2); color: var(--hcc-accent, #0072B2); }
+.hcc-plot-tools.is-changed .hcc-pt-reset { border-color: var(--hcc-accent, #0072B2); color: var(--hcc-accent, #0072B2); }
 .hcc-with-bar { display: flex; gap: 0.5rem; align-items: stretch; }
 .hcc-with-bar > .hcc-stage { position: relative; flex: 1 1 auto; min-width: 0; }
 .hcc-with-bar > canvas.hcc-colorbar { flex: 0 0 auto; width: 84px; height: auto; min-height: 0; aspect-ratio: auto; align-self: stretch; contain: size; }  /* contain: size — the bar's pixel buffer is sized from its rendered height (× devicePixelRatio), and without containment that intrinsic size would grow the row on Retina displays */

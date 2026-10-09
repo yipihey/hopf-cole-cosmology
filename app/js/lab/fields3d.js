@@ -5,9 +5,10 @@ import { VolumeView } from '../viz/volumeview.js';
 import { renderColorbar, COLORMAPS } from '../viz/colormaps.js';
 import { slider, checkbox } from '../viz/ui.js';
 import { slice3D } from '../hcc.js';
-import { el, sel } from './dom.js';
+import { el, sel, setCaption } from './dom.js';
+import { pngButton, exportPNG, pngName } from './export.js';
 import { Engine } from './engine.js';
-import { exactNote } from './catalog.js';
+import { exactNote, FIELD_BOOK, BOOK } from './catalog.js';
 
 const CMAPS = Object.keys(COLORMAPS).map((c) => [c, c]);
 const FIELDS = [['cic', 'CIC density'], ['sheet', 'Sheet density (tetrahedra)'], ['sheetp1', 'Sheet density (P1, vertex-interpolated)'], ['sheetx', 'Sheet density (exact P0)'], ['sheetxp1', 'Sheet density (exact P1)'], ['nufft', 'NUFFT density (refined map)'], ['hc', 'Hopf–Cole density'], ['hcdual', 'Hopf–Cole dual sheet (mass-conserving)'], ['lin', 'Linear density 1+Dδ0']];
@@ -42,8 +43,23 @@ export class Fields3D {
     const stage = el('div', 'hcc-stage', wb);
     const cv = el('canvas', 'lab-cv' + (cls ? ' ' + cls : ''), stage);
     const bar = el('canvas', 'hcc-colorbar', wb); bar.width = 84; bar.height = 8;
+    cv.setAttribute('role', 'img'); bar.setAttribute('role', 'img');
     return { cv, bar };
   }
+
+  /** Accessible names of a panel's canvas and colour bar. */
+  aria(cv, bar, text, unit) {
+    cv.setAttribute('aria-label', text);
+    if (bar) bar.setAttribute('aria-label', 'Colour scale of ' + text.charAt(0).toLowerCase() + text.slice(1) + (unit ? ': ' + unit : ''));
+  }
+
+  /** "png" button in a panel header: redraw the view synchronously, compose stage + colour bar, download. */
+  addPng(p, cv, bar, view, name) {
+    const b = pngButton(p.head, (btn) => { const v = view(); return v ? exportPNG({ canvas: cv, bar, redraw: () => v.draw() }, name(), btn) : null; });
+    b.setAttribute('aria-label', `Download the ${p.title.toLowerCase()} panel as PNG`);
+    return b;
+  }
+  dTag() { return this.app.P.D; }
 
   buildVolume() {
     const S = this.app.S, app = this.app;
@@ -60,6 +76,8 @@ export class Fields3D {
     this.phV.hidden = true;
     const { cv, bar } = this.canvasBlock(p.root);
     this.cvV = cv; this.barV = bar;
+    this.aria(cv, bar, `Volume rendering of the ${FNAME[S.v1]}`, 'ρ/ρ̄');
+    this.addPng(p, cv, bar, () => (this.volOn && this.vv && this.vv.data ? this.vv : null), () => pngName('volume', S.v1, this.dTag()));
     this.syncBackend();
     this.capV = el('p', 'hcc-note lab-cap', p.root);
     this.hintV = el('p', 'hcc-note lab-hint', p.root, 'Drag to rotate, wheel to zoom, double-click to reset (WebGPU). Without WebGPU: three central slices.');
@@ -76,6 +94,11 @@ export class Fields3D {
     checkbox(p.opts, { label: 'log', value: S.l2, onChange: (v) => { S.l2 = v; app.hashChanged(); this.updateSlice(); } });
     const { cv, bar } = this.canvasBlock(p.root);
     this.cvS = cv; this.barS = bar;
+    this.aria(cv, bar, `Slice of the ${FNAME[S.s1]}`, 'ρ/ρ̄');
+    this.addPng(p, cv, bar, () => (this.fvS && this.fvS.data ? this.fvS : null), () => {
+      const n = this.app.eng.n || S.n, idx = Math.max(0, Math.min(n - 1, Math.round(S.si * (n - 1))));
+      return pngName('slice', `${S.s1}_${'xyz'[S.sa]}${idx}`, this.dTag());
+    });
     this.capS = el('p', 'hcc-note lab-cap', p.root);
   }
 
@@ -93,6 +116,8 @@ export class Fields3D {
     sel(p.opts, { label: 'map', options: CMAPS, value: S[cmapKey], onChange: (v) => { S[cmapKey] = v; app.hashChanged(); this.updateFourier(slot); } });
     const { cv, bar } = this.canvasBlock(p.root);
     this['cvF' + slot] = cv; this['barF' + slot] = bar;
+    this.aria(cv, bar, `${abs ? 'Fourier amplitude' : 'Fourier phase'} map of the ${FNAME[S.fo]} in the k_z = 0 plane`, abs ? 'log₁₀|δ̂|/max' : 'arg δ̂ [rad]');
+    this.addPng(p, cv, bar, () => { const fv = this['fv' + slot]; return fv && fv.data ? fv : null; }, () => pngName(kind, S.fo, this.dTag()));
     this['capF' + slot] = el('p', 'hcc-note lab-cap', p.root);
     this['hover' + slot] = el('div', 'lab-hover hcc-note', p.root, ' ');
     cv.addEventListener('pointermove', (ev) => {
@@ -176,13 +201,14 @@ export class Fields3D {
     this.vv.setVolume(rho, eng.n);
     this.vv.setRange(undefined, undefined, { log: S.l1 });
     const gpuCic = S.v1 === 'cic' && eng.lastPath === 'GPU' && eng.gpuActive(P);
-    this.capV.textContent = `${FNAME[S.v1]}: ${S.vm === 'mip' ? 'maximum-intensity projection' : 'emission-absorption ray marching'} through the ${eng.n}³ box.`
+    this.aria(this.cvV, this.barV, `Volume rendering of the ${FNAME[S.v1]}`, 'ρ/ρ̄');
+    setCaption(this.capV, `${FNAME[S.v1]}: ${S.vm === 'mip' ? 'maximum-intensity projection' : 'emission-absorption ray marching'} through the ${eng.n}³ box.`
       + (S.v1 === 'sheetp1' ? ' The density inside each tetrahedron varies linearly between the vertex values 1/|J| (barycentric interpolation, rescaled so every simplex still deposits exactly its mass)' + (eng.lastPath === 'GPU' && eng.gpuActive(P) ? '; GPU: the vertex densities come from a finite-difference Jacobian of the displacement.' : '; WASM (GPU compute off): about 1 s at 64³.') : '')
       + (S.v1 === 'sheet' ? (eng.lastPath === 'GPU' && eng.gpuActive(P) ? ' GPU: one thread per Lagrangian cell, six Kuhn tetrahedra, watertight point-in-tetrahedron tests, 18-bit fixed-point atomics.' : ` WASM (GPU compute off): about 1 s at 64³, 4 s at 96³${eng.n >= 128 ? '; at 128³ this takes tens of seconds, prefer CIC or Hopf–Cole' : ''}.`) : '')
       + (Engine.isExact(S.v1) ? ' Every simplex is clipped against the cells it overlaps and deposits the exact integral of its density profile; no sampling noise, mass conserved to roundoff.' + (S.v1 === 'sheetxp1' ? ' P1: the vertex densities 1/|J| are interpolated linearly inside each tetrahedron.' : '') + exactNote(eng, S.v1) + (eng.lastPath !== 'GPU' || !eng.gpuActive(P) ? ' WASM (GPU compute off): about 1 s at 32³, 2–3 s at 64³.' : '') : '')
       + (S.v1 === 'nufft' ? ` Refine ${P.rf}: the displacement is Fourier-interpolated to ${P.rf}n points per axis and the trapezoidal rule is evaluated by a type-1 NUFFT (WASM, a few seconds at 64³ with refine 2); spectrally accurate for a band-limited displacement, counts all streams.` : '')
       + (S.v1 === 'hcdual' ? DUAL_NOTE : '')
-      + (gpuCic ? ' GPU CIC deposits 18-bit fixed-point weights with integer atomics (mass conserved exactly); a cell would overflow at ρ/ρ̄ ≥ 16384.' : '');
+      + (gpuCic ? ' GPU CIC deposits 18-bit fixed-point weights with integer atomics (mass conserved exactly); a cell would overflow at ρ/ρ̄ ≥ 16384.' : ''), FIELD_BOOK[S.v1]);
     this.drawVolume();
     this.pv.root.classList.remove('is-stale');
     this.updateSliceRange();
@@ -215,7 +241,8 @@ export class Fields3D {
     const r = this.fvS.getRange();
     renderColorbar(this.barS, S.c2, r.vmin, r.vmax, { label: 'ρ/ρ̄', log: r.log });
     const ax = ['x', 'y', 'z'][S.sa], hv = [['y', 'z'], ['x', 'z'], ['x', 'y']][S.sa];
-    this.capS.textContent = `${FNAME[S.s1]} on the plane ${ax} = ${idx} of ${n} (${hv[0]} horizontal, ${hv[1]} vertical).` + (S.s1 === 'hcdual' ? DUAL_NOTE : '') + (Engine.isExact(S.s1) ? ' Every simplex is clipped against the cells it overlaps and deposits the exact integral of its density profile; no sampling noise, mass conserved to roundoff.' : '');
+    this.aria(this.cvS, this.barS, `Slice of the ${FNAME[S.s1]} on the plane ${'xyz'[S.sa]} = ${idx}`, 'ρ/ρ̄');
+    setCaption(this.capS, `${FNAME[S.s1]} on the plane ${ax} = ${idx} of ${n} (${hv[0]} horizontal, ${hv[1]} vertical).` + (S.s1 === 'hcdual' ? DUAL_NOTE : '') + (Engine.isExact(S.s1) ? ' Every simplex is clipped against the cells it overlaps and deposits the exact integral of its density profile; no sampling noise, mass conserved to roundoff.' : ''), FIELD_BOOK[S.s1]);
     this.ps.root.classList.remove('is-stale');
   }
   updateSliceRange() { if (this.app.S.same && this.fvS && this.fvS.data) this.updateSlice(); }
@@ -243,9 +270,10 @@ export class Fields3D {
     const r = fv.getRange();
     renderColorbar(this['barF' + slot], cmap, r.vmin, r.vmax, { label: abs ? 'log₁₀|δ̂|/max' : 'arg δ̂ [rad]' });
     const what = { cic: 'CIC', sheet: 'sheet', sheetp1: 'P1 sheet', sheetx: 'exact P0 sheet', sheetxp1: 'exact P1 sheet', nufft: 'NUFFT', hc: 'Hopf–Cole', hcdual: 'Hopf–Cole dual sheet', lin: 'linear' }[S.fo];
-    this['capF' + slot].textContent = abs
+    this.aria(this['cvF' + slot], this['barF' + slot], `${abs ? 'Fourier amplitude' : 'Fourier phase'} map of the ${FNAME[S.fo]} in the k_z = 0 plane`, abs ? 'log₁₀|δ̂|/max' : 'arg δ̂ [rad]');
+    setCaption(this['capF' + slot], abs
       ? `log₁₀|δ̂(k)|/max of the ${what} density in the k_z = 0 plane (k_x horizontal, k_y vertical, k = 0 at the centre).`
-      : `Phase of δ̂(k) of the ${what} density in the k_z = 0 plane. Mode coupling correlates the phases of generated modes with those of their parents.`;
+      : `Phase of δ̂(k) of the ${what} density in the k_z = 0 plane. Mode coupling correlates the phases of generated modes with those of their parents.`, BOOK.phases);
     this['pf' + slot].root.classList.remove('is-stale');
   }
 

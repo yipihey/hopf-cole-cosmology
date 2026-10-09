@@ -7,6 +7,7 @@
 
 import { COLORMAPS } from './colormaps.js';
 import { linearTicks, logTicks, formatLinear, formatLog } from './ticks.js';
+import { downloadText, slugify, flash } from './download.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -93,8 +94,13 @@ export class LinePlot {
     };
     this._tx = axisTools('x', 'x');
     this._ty = axisTools('y', 'y');
-    const r = mk('button', 'hcc-pt-btn', bar, 'reset'); r.type = 'button'; r.title = 'Reset zoom, ranges and scales';
+    const r = mk('button', 'hcc-pt-btn hcc-pt-reset', bar, 'reset'); r.type = 'button'; r.title = 'Reset zoom, ranges and scales';
     r.addEventListener('click', () => this.resetView());
+    const ex = mk('span', 'hcc-pt-export', bar);
+    const bs = mk('button', 'hcc-pt-btn', ex, 'svg'); bs.type = 'button'; bs.title = 'Download this plot as a standalone SVG file';
+    bs.addEventListener('click', () => { this.downloadSVG(); flash(bs, 'saved'); });
+    const bc = mk('button', 'hcc-pt-btn', ex, 'csv'); bc.type = 'button'; bc.title = 'Download the plotted series as a CSV file (full precision)';
+    bc.addEventListener('click', () => { this.downloadCSV(); flash(bc, 'saved'); });
     this._readout = mk('span', 'hcc-pt-readout', bar, '');
     this.container.appendChild(bar);
     this._bindEvents();
@@ -242,6 +248,54 @@ export class LinePlot {
   /** Serialized SVG (e.g. for download). */
   toSVGString() { return new XMLSerializer().serializeToString(this.svg); }
 
+  /** Self-contained SVG document: xmlns, explicit size, `color: #222` (so currentColor renders outside the page) and a white background. */
+  toStandaloneSVG() {
+    const W = this.opts.width, H = this.opts.height;
+    const c = this.svg.cloneNode(true);
+    c.setAttribute('xmlns', NS);
+    c.setAttribute('width', W); c.setAttribute('height', H);
+    c.setAttribute('style', 'color:#222;overflow:visible;font:12px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif');
+    const bg = document.createElementNS(NS, 'rect');
+    for (const [k, v] of Object.entries({ x: 0, y: 0, width: W, height: H, fill: '#fff' })) bg.setAttribute(k, v);
+    c.insertBefore(bg, c.firstChild);
+    let out = new XMLSerializer().serializeToString(c);
+    if (!/^<svg[^>]*\sxmlns=/.test(out)) out = out.replace(/^<svg/, `<svg xmlns="${NS}"`);
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + out + '\n';
+  }
+
+  /** File stem from the title (or the y label), slugified. */
+  _fileStem() { return slugify(this.axes.title || this.axes.ylabel || 'plot'); }
+
+  downloadSVG() { return downloadText(this.toStandaloneSVG(), this._fileStem() + '.svg', 'image/svg+xml'); }
+
+  /**
+   * The plotted series as CSV. When all series share the same x array: wide format `x,<label1>,<label2>,...`;
+   * otherwise long format `series,x,y` with one row per point. Numbers are written with full (shortest round-trip) precision.
+   */
+  toCSV() {
+    const S = this.series.filter((s) => s && s.x && s.y);
+    const name = (s, k) => (s.label ? String(s.label) : `series${k + 1}`);
+    const q = (t) => (/[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t);
+    const num = (v) => String(v);
+    const n0 = S.length ? Math.min(S[0].x.length, S[0].y.length) : 0;
+    const shared = S.length > 0 && S.every((s) => {
+      if (Math.min(s.x.length, s.y.length) !== n0 || s.x.length !== S[0].x.length) return false;
+      for (let i = 0; i < n0; i++) if (s.x[i] !== S[0].x[i] && !(s.x[i] !== s.x[i] && S[0].x[i] !== S[0].x[i])) return false;
+      return true;
+    });
+    const L = [];
+    if (shared) {
+      L.push(['x', ...S.map(name)].map(q).join(','));
+      for (let i = 0; i < n0; i++) L.push([num(S[0].x[i]), ...S.map((s) => num(s.y[i]))].join(','));
+    } else {
+      L.push('series,x,y');
+      S.forEach((s, k) => { const nm = q(name(s, k)), n = Math.min(s.x.length, s.y.length); for (let i = 0; i < n; i++) L.push(`${nm},${num(s.x[i])},${num(s.y[i])}`); });
+    }
+    return L.join('\n') + '\n';
+  }
+
+  downloadCSV() { return downloadText(this.toCSV(), this._fileStem() + '.csv', 'text/csv'); }
+
   destroy() { this.svg.remove(); if (this.tools) this.tools.remove(); }
 
   // --- hooks overridden by WaterfallPlot ------------------------------------
@@ -283,7 +337,7 @@ export class LinePlot {
   draw() {
     const A = this._effAxes(), svg = this.svg, W = this.opts.width, H = this.opts.height;
     while (svg.firstChild) svg.removeChild(svg.firstChild);
-    svg.setAttribute('aria-label', A.title || 'plot');
+    svg.setAttribute('aria-label', A.title || (A.ylabel && A.xlabel ? `${A.ylabel} versus ${A.xlabel}` : 'plot'));
     const series = this._drawSeries();
     const [x0, x1] = this._limits(series, 'x', A.xlog, A.xlim, 0);
     const [y0, y1] = this._limits(series, 'y', A.ylog, A.ylim, A.ylog ? 0.03 : 0.05);
