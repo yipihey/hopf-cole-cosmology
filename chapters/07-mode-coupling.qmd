@@ -91,7 +91,12 @@ function of $\mathbf q$ and the trapezoidal sum over the refined grid
 converges exponentially. Evaluated as a type-1 non-uniform FFT, this
 "NUFFT density" counts all streams, has no facets, and converges with the
 refinement factor, which makes it the reference for the true spectrum of
-the map.
+the map. When comparing with deposited fields remember their windows: a
+cell-averaged estimator (the exact deposits, the dual sheet) carries
+$\prod_a \mathrm{sinc}^2(k_a\Delta x/2)$ in its power spectrum, already
+$0.4$ per axis at the Nyquist frequency, and must be deconvolved before
+it can be compared with a deposit-free spectrum; point-sampled sheets and
+the direct and NUFFT spectra carry no window at all.
 
 ## Sensitivity to the cutoff and the EFT counterterm
 

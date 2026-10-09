@@ -138,6 +138,18 @@ pub fn cic_density(dim: usize, pos: &[f32], npart: usize, l: f64, ne: usize) -> 
     rho.iter().map(|&v| (v * norm) as f32).collect()
 }
 
+/// Top-hat (cell-average) window: W(k) = Π_a sinc(k_a dx/2).  Cell-averaged
+/// estimators (exact deposits, dual sheet) carry W² in their power spectrum.
+pub fn tophat_cell_window(grid: &Grid, idx: usize) -> f64 {
+    let ijk = grid.unravel(idx);
+    let mut w = 1.0;
+    for a in 0..grid.dim {
+        let x = std::f64::consts::PI * grid.ifreq(ijk[a]) as f64 / grid.n as f64;
+        w *= if x.abs() < 1e-12 { 1.0 } else { x.sin() / x };
+    }
+    w
+}
+
 /// CIC window deconvolution factor for the power spectrum (Jing 2005 leading term):
 /// W(k) = Π_a sinc(k_a dx/2)^2.
 pub fn cic_window(grid: &Grid, idx: usize) -> f64 {

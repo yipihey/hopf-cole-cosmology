@@ -279,13 +279,16 @@ impl Cosmo {
         (r, frac)
     }
     pub fn power_spectrum(&mut self, f: &[f32], nbins: usize, deconvolve_cic: bool) -> Spectrum {
+        self.power_spectrum_w(f, nbins, if deconvolve_cic { 1 } else { 0 })
+    }
+    /// Power spectrum with window deconvolution: 0 none, 1 CIC (÷ Π sinc⁴), 2 top-hat cell average (÷ Π sinc²).
+    pub fn power_spectrum_w(&mut self, f: &[f32], nbins: usize, window: u32) -> Spectrum {
         let fh = self.eng.forward_real_f32(f);
-        if deconvolve_cic {
-            let g = self.grid.clone();
-            let w = move |idx: usize| sheet::cic_window(&g, idx).powi(2);
-            spectra::power_spectrum_hat(&self.grid, &fh, &fh, nbins, Some(&w))
-        } else {
-            spectra::power_spectrum_hat(&self.grid, &fh, &fh, nbins, None)
+        let g = self.grid.clone();
+        match window {
+            1 => { let w = move |idx: usize| sheet::cic_window(&g, idx).powi(2); spectra::power_spectrum_hat(&self.grid, &fh, &fh, nbins, Some(&w)) }
+            2 => { let w = move |idx: usize| sheet::tophat_cell_window(&g, idx).powi(2); spectra::power_spectrum_hat(&self.grid, &fh, &fh, nbins, Some(&w)) }
+            _ => spectra::power_spectrum_hat(&self.grid, &fh, &fh, nbins, None),
         }
     }
     pub fn cross_spectrum(&mut self, f: &[f32], g: &[f32], nbins: usize) -> Spectrum {

@@ -225,6 +225,13 @@ impl CosmoSim {
         out.extend(s.nmodes.iter());
         out
     }
+    /// Power spectrum with window deconvolution: window 0 none, 1 CIC, 2 top-hat cell average.
+    pub fn power_spectrum_w(&mut self, f: &[f32], nbins: usize, window: u32) -> Vec<f64> {
+        let s = self.inner.power_spectrum_w(f, nbins, window);
+        let mut out = s.k.clone(); out.extend(s.p.iter()); out.extend(s.nmodes.iter()); out
+    }
+    /// Top-hat cell window W(k) = Π sinc(k_a dx/2) at a fft-ordered flat grid index (for GPU-side deconvolution).
+    pub fn tophat_window_at(&self, idx: usize) -> f64 { crate::sheet::tophat_cell_window(&self.inner.grid, idx) }
     pub fn cross_spectrum(&mut self, f: &[f32], g: &[f32], nbins: usize) -> Vec<f64> {
         let s = self.inner.cross_spectrum(f, g, nbins);
         let mut out = s.k.clone();

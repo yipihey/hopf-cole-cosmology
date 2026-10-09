@@ -597,3 +597,28 @@ fn exact_sheet_deposit() {
     assert!((m0 - 1.0).abs() < 1e-6 && (m1 - 1.0).abs() < 1e-6);
     assert!((e / nn).sqrt() < 0.1);
 }
+
+#[test]
+fn tophat_deconvolution_matches_direct_spectrum() {
+    // exact P0 deposit ÷ W² must match the direct (deposit-free) spectrum up to high k
+    let n = 64usize;
+    let mut c = Cosmo::new(2, n, 1.0);
+    c.set_ic_gaussian(PkShape::PowerLaw { n: -1.0 }, 0.06, 2, 1.0);
+    c.build_lpt(2);
+    let d = 0.6 * c.shell_crossing(2);
+    let dep = c.sheet_density_exact(d, 2, n, false, 1e4);
+    let dd: Vec<f32> = dep.iter().map(|v| v - 1.0).collect();
+    let praw = c.power_spectrum_w(&dd, 12, 0);
+    let pdec = c.power_spectrum_w(&dd, 12, 2);
+    let ds = c.direct_spectrum(d, 2, false, 12, 64, 1, 1e4);
+    for i in 0..4 {
+        let r_raw = praw.p[i] / ds.p[i];
+        let r_dec = pdec.p[i] / ds.p[i];
+        println!("k={:.1}: raw/direct {:.4}, deconvolved/direct {:.4}", praw.k[i], r_raw, r_dec);
+        assert!((r_dec - 1.0).abs() < 0.01, "bin {i}: {r_dec}");
+    }
+    // near the Nyquist frequency the raw deposit is strongly suppressed while the deconvolved one is not
+    let last = praw.k.len() - 2;
+    println!("k={:.1}: raw/deconvolved {:.3}", praw.k[last], praw.p[last] / pdec.p[last]);
+    assert!(praw.p[last] / pdec.p[last] < 0.7);
+}
