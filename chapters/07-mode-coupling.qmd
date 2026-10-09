@@ -31,7 +31,7 @@ F_n^{\rm ZA}(\mathbf k_1,\dots,\mathbf k_n) = \frac{1}{n!}\prod_{i=1}^n \frac{\m
 $$ {#eq-fza}
 
 which is just the Taylor expansion of the determinant @eq-density-hc. The
-difference $F_2 - F_2^{\rm ZA} = \tfrac{2}{7}\left[1 - \frac{(\mathbf k_1\cdot\mathbf k_2)^2}{k_1^2k_2^2}\right]$
+difference $F_2 - F_2^{\rm ZA} = \tfrac{3}{14}\left[1 - \frac{(\mathbf k_1\cdot\mathbf k_2)^2}{k_1^2k_2^2}\right]$
 is the tidal coupling that 2LPT adds and Burgers' equation lacks.
 
 ::: {.callout-tip title="Try it: two plane waves"}
@@ -44,8 +44,208 @@ and so on. Compare 1LPT (Zel'dovich kernels) with 2LPT and 4LPT, and both
 with the Hopf–Cole solution: Hopf–Cole reproduces *all* Zel'dovich harmonics
 at once because the exponential resums the series. Make the two waves
 parallel and the tidal term switches off, so that the gravitational and
-Zel'dovich harmonics agree.
+Zel'dovich harmonics agree. The *Kernels* section of the laboratory turns
+this into a measurement: it reads the harmonic amplitudes off the Fourier
+map and divides out $D^2$ and the initial amplitudes, so that what is
+plotted *is* the kernel (@sec-viscous-kernels).
 :::
+
+## Viscous kernels: perturbation theory for the adhesion model {#sec-viscous-kernels}
+
+A natural question for anyone who has met both the adhesion model and
+Lagrangian perturbation theory is: *what are the perturbation-theory kernels
+of Burgers' equation at finite viscosity, and how do they differ from the
+gravitational ones?* Solving @eq-adhesion order by order in $\delta_0$ is
+tedious. The Hopf–Cole transform makes it a three-line calculation, and the
+calculation turns out to be the quantitative version of
+[Chapter 4](04-two-spaces.qmd): the nonlinearity sits entirely in an
+exponential and a logarithm, so the kernels are *cumulants*.
+
+### The potential as a cumulant generating function
+
+Start from the exact solution @eq-adhesion-hc written for the velocity
+potential, $\Phi = -2\nu\ln\psi$ with $\psi = G_D * e^{\varphi/2\nu}$, where
+$G_D$ is the heat kernel, $\hat G_D(k) = e^{-\nu k^2 D}$. Because $G_D$ is a
+normalized Gaussian, the convolution is an *average* of $e^{\varphi/2\nu}$
+over Lagrangian points $\mathbf q$ drawn from a Gaussian of variance
+$2\nu D$ around $\mathbf x$. The logarithm of an average of an exponential is
+a cumulant generating function:
+
+$$
+\Phi(\mathbf x, D) = -2\nu \ln\Big\langle e^{\varphi/2\nu}\Big\rangle_{\mathbf q\sim\mathcal N(\mathbf x,\,2\nu D)}
+= -\sum_{n\ge1} \frac{\kappa_n[\varphi](\mathbf x, D)}{n!\,(2\nu)^{n-1}} ,
+$$ {#eq-cumulant}
+
+where $\kappa_1 = G_D*\varphi$ is the smoothed potential, $\kappa_2 =
+G_D*\varphi^2 - (G_D*\varphi)^2$ its variance under the kernel, and so on.
+Every term is exact in $\nu$; the series is in powers of $\varphi$, i.e. of
+$\delta_0$. The structure is worth a pause: the $n$-th order term carries an
+explicit $\nu^{1-n}$, while the $n$-th cumulant of a field sampled with a
+kernel of width $\sqrt{2\nu D}$ vanishes like $\nu^{\,n-1}$ as the kernel
+shrinks. The inviscid limit is a product of a divergence and a zero, and the
+finite result it leaves behind is the Zel'dovich solution; everything beyond
+it is the viscous correction we are after.
+
+### First order: the propagator
+
+With $\hat\varphi = -\hat\delta_0/k^2$ and $1+\delta = \det(\mathbf 1 - D\nabla\nabla\Phi)$
+from @eq-density-hc, the linear term $\Phi^{(1)} = -G_D*\varphi$ gives
+
+$$
+\hat\delta^{(1)}(\mathbf k) = D\,e^{-\nu k^2 D}\,\hat\delta_0(\mathbf k) .
+$$ {#eq-viscous-propagator}
+
+The linear growth $D$ is multiplied by the heat-kernel damping: viscosity
+erases linear modes beyond $k_\nu \sim (\nu D)^{-1/2}$. In the laboratory
+this is the row $\mathbf k_1$ of the *Kernels* table, and it is the reason
+the Hopf–Cole power spectrum falls below the sheet at high $k$ when $\nu$ is
+raised.
+
+### Second order: the viscous kernel
+
+Expanding the determinant to second order,
+$\delta^{(2)} = -D\nabla^2\Phi^{(2)} + \tfrac12 D^2\big[(\nabla^2\Phi^{(1)})^2 - \Phi^{(1)}_{,ij}\Phi^{(1)}_{,ij}\big]$,
+and inserting the second cumulant,
+$\Phi^{(2)} = -\tfrac{1}{4\nu}\big[G_D*\varphi^2 - (G_D*\varphi)^2\big]$,
+gives $\hat\delta^{(2)}(\mathbf k) = D^2\!\int_{\mathbf k_1+\mathbf k_2=\mathbf k} F_2^{\nu}\,\hat\delta_0(\mathbf k_1)\hat\delta_0(\mathbf k_2)$ with
+
+$$
+F_2^{\nu}(\mathbf k_1,\mathbf k_2) = e^{-\nu(k_1^2+k_2^2)D}\Big[
+F_2^{\rm ZA}
+- \tfrac{k^2\,\mathbf k_1\cdot\mathbf k_2}{2k_1^2k_2^2}\,(1 - \mathcal W)\Big],
+$$ {#eq-f2-viscous}
+
+where $\mathcal W = \mathcal W(2\nu D\,\mathbf k_1\!\cdot\!\mathbf k_2)$ with
+$\mathcal W(x) = (1-e^{-x})/x = \int_0^1 e^{-xs}\,ds$.
+
+Three things are visible at a glance.
+
+1. **The inviscid limit is Zel'dovich.** $\mathcal W(0) = 1$ and the
+   prefactor tends to one, so $F_2^\nu \to F_2^{\rm ZA}$ of @eq-fza. The
+   gravitational tidal term $\tfrac{3}{14}[1-\cos^2\theta_{12}]$ never appears:
+   Burgers' equation has no Poisson equation, and no viscosity will generate
+   one. Adhesion is not an approximation to 2LPT; it is Zel'dovich plus
+   dissipation.
+2. **Both legs are damped.** The prefactor $e^{-\nu(k_1^2+k_2^2)D}$ is the
+   product of the two linear propagators @eq-viscous-propagator: the
+   second-order mode is built from already-damped linear modes.
+3. **The coupling itself is weakened.** $\mathcal W < 1$ for aligned waves
+   ($\mathbf k_1\cdot\mathbf k_2 > 0$) and $\mathcal W > 1$ for anti-aligned
+   ones, so viscosity suppresses the growth of the sum mode
+   $\mathbf k_1+\mathbf k_2$ more than the difference mode. This term is
+   the trace of the second cumulant: the heat kernel converts the
+   *interaction* of two modes over the time $D$ into an average over the
+   history of the damping, as the integral form of $\mathcal W$ shows.
+
+Higher orders follow the same pattern. The $n$-th cumulant supplies
+$F_n^\nu$, and in the limit $\nu\to0$ the cumulants collapse to the
+factorized Zel'dovich kernels @eq-fza. The complete answer to the question
+we started with is therefore: *the perturbation theory of the adhesion model
+is Zel'dovich perturbation theory with every propagator and every vertex
+dressed by heat-kernel factors*; the gravitational kernels differ by the
+tidal and higher Poisson terms that Lagrangian perturbation theory adds order
+by order ([Chapter 6](06-lpt.qmd)). Models that put the viscosity back into
+the gravitational equations, such as the adhesive gravitational clustering
+of @buchert2005 or the Eulerian extension of @menci2002, interpolate between
+the two.
+
+::: {.callout-tip title="Try it: measure the kernel"}
+Open the *Kernels* section with the two-plane-wave initial condition. The
+table lists, for $\mathbf k_1$, $\mathbf k_1\pm\mathbf k_2$, $2\mathbf k_1$
+and $2\mathbf k_2$, the kernel *measured* from the Hopf–Cole density and
+from the sheet, next to $F_2^\nu$, $F_2^{\rm ZA}$ and the gravitational
+$F_2$. Hopf–Cole follows @eq-f2-viscous at every $\nu$ (the core test
+checks it to $10^{-3}$); the sheet at order 1 gives the Zel'dovich value and
+at order 2 and above the gravitational one, $5/7$ for orthogonal waves
+instead of $1/2$. Sweep $D$ at fixed $\nu$ and the measured points slide down
+the dashed viscous curves; sweep $\nu$ at fixed $D$ and watch
+$\nu k^2 D$ become the only variable that matters. Keep $D$ well below
+$D_{\rm sc}$: third- and fourth-order harmonics contaminate the second-order
+modes in proportion to $D^2$.
+:::
+
+### The whole lattice at once {#sec-lattice}
+
+Perturbation theory produces the harmonics one order at a time. For the
+Zel'dovich dynamics the Hopf–Cole exponential produces them all at once, and
+for plane-wave initial conditions it does so in closed form. Mass
+conservation, $(1+\delta)\,d^dx = d^dq$, gives the Fourier transform of the
+density as an integral over Lagrangian space,
+$\hat\delta(\mathbf k) = \int d^dq\, e^{-i\mathbf k\cdot\mathbf x(\mathbf q)}$
+for $\mathbf k\ne0$. With two waves the displacement is
+$\boldsymbol\Psi = -D\big[\tfrac{A_1}{k_1}\sin(\mathbf k_1\!\cdot\!\mathbf q)\,\hat{\mathbf k}_1 + \tfrac{A_2}{k_2}\sin(\mathbf k_2\!\cdot\!\mathbf q)\,\hat{\mathbf k}_2\big]$,
+and the Jacobi–Anger expansion $e^{iz\sin\theta} = \sum_n J_n(z)e^{in\theta}$
+turns the exponential of a sine into a sum of harmonics:
+
+$$
+\hat\delta(n\mathbf k_1 + m\mathbf k_2) = \pm J_n(z_1)\,J_m(z_2),
+\qquad z_i = A_i D\,\frac{\mathbf k\cdot\mathbf k_i}{k_i^2},
+$$ {#eq-lattice}
+
+with $\mathbf k = n\mathbf k_1 + m\mathbf k_2$ and zero amplitude anywhere else. This is the two-dimensional cousin of
+Cole's series @eq-cole-series. The evolved field lives on the **lattice**
+generated by the initial wave vectors; the small-argument limit
+$J_1(z)\simeq z/2$ reproduces the second-order kernel
+$2F_2^{\rm ZA}\,\hat\delta_0(\mathbf k_1)\hat\delta_0(\mathbf k_2)$ at
+$\mathbf k_1+\mathbf k_2$, while at shell crossing ($A_1D = 1$ for a single
+wave) the amplitudes along the ladder $n\mathbf k_1$ decay as
+$J_n(n)\simeq 0.45\,n^{-1/3}$, the Fourier image of the $|x|^{-2/3}$ density
+cusp of a forming pancake. The phases are locked: with initial phases
+$\theta_1,\theta_2$ the harmonic $(n,m)$ has phase $-(n\theta_1+m\theta_2)$
+plus a sign, a *linear* function on the lattice.
+
+This explains what the Fourier panels of the laboratory show for a Gaussian
+field once $D$ is not small. A smoothed random field is dominated by a
+handful of long modes; each generates a radial ladder of harmonics with the
+period of its own wave vector, and each pair generates the oblique lattice
+$n\mathbf k_i + m\mathbf k_j$ of @eq-lattice, with phases that vary
+linearly across it. The striking regularities in the amplitude map, straight
+rows of bright modes with a fixed spacing running diagonally across the
+$(k_x,k_y)$ plane, and the parallel fringes in the phase map, are these
+lattices; the spacing names the generating mode, and the direction of the
+rows names the pair. In the Hopf–Cole picture the same lattice is already
+present at $D=0$ in $\hat\psi_0$ (compare the $\log|\hat\psi|$ panel), with
+amplitudes $I_n(A_1/2\nu k_1^2)\,I_m(A_2/2\nu k_2^2)$; the heat equation then
+damps the harmonic $(n,m)$ by $e^{-\nu|n\mathbf k_1+m\mathbf k_2|^2D}$, and
+the logarithm converts the modified Bessel functions of $\hat\psi$ into the
+ordinary ones of @eq-lattice. After shell crossing the geometry of
+[Chapter 5](05-zeldovich.qmd) takes over: each straight wall of the
+adhesion tessellation contributes a streak through the origin along its
+normal, with the phase $e^{-i\mathbf k\cdot\mathbf x_{\rm wall}}$ varying
+linearly along the streak, and each node a broad contribution with a linear
+phase; pairs of walls or nodes a distance $s$ apart beat with a period
+$2\pi/s$ in $k$. Phase coherence across $\mathbf k$ is, in both regimes, the
+Fourier signature of mass that has been *moved coherently*: a displacement
+in real space is a linear phase in Fourier space, and the nonlinear maps of
+[Chapter 4](04-two-spaces.qmd) are the only place where that information is
+written.
+
+### Viscosity is a counterterm {#sec-viscous-eft}
+
+Square the propagator @eq-viscous-propagator and expand for small
+$\nu k^2 D$:
+
+$$
+P^{(11)}_\nu(k) = D^2 e^{-2\nu k^2 D} P_0(k) \simeq D^2 P_0(k) - 2\,(\nu D)\,k^2 D^2 P_0(k) .
+$$ {#eq-viscous-counterterm}
+
+This is exactly the form of the EFT counterterm @eq-eft, with
+$c_s^2 = \nu D$. The lowest-order effect of a viscosity on the power
+spectrum *is* a speed-of-sound term, and its sign is the one the fits
+return: positive, a damping. The adhesion model is therefore a concrete
+realization of the EFT bookkeeping, with two differences that are worth
+keeping in mind when the next section fits $c_s^2$. In the EFT the
+counterterm stands in for whatever the unresolved gravitational dynamics
+does to the long modes, its value is fitted (or matched to simulations),
+and its time dependence follows from the small-scale physics; in the
+adhesion model the "stress" is a specific, known operator,
+$c_s^2 = \nu D$ grows linearly with the clock, and the same operator fixes
+every higher-order vertex through @eq-f2-viscous instead of leaving them
+free. And where the EFT needs a cutoff $\Lambda\sim1/R$ to define the loop
+integrals, the viscosity supplies a soft one of its own at
+$k_\nu = (\nu D)^{-1/2}$: raise $\nu$ in the laboratory and the one-loop
+fit of $c_s^2$ to the Hopf–Cole spectrum tracks $\nu D$ until $k_\nu$ enters
+the fitting range.
 
 ## The power spectrum at one loop
 
@@ -117,7 +317,9 @@ cancel the cutoff dependence of $P_{13}$, and its finite part encodes real
 small-scale physics that must be fitted to simulations (or, here, to the
 higher-order sheet solution). The laboratory lets you fit $c_s^2$ by least
 squares over $k < k_{\max}$ and watch it change with $R$ and with the LPT
-order used as the "truth".
+order used as the "truth". Fit it to the Hopf–Cole spectrum instead and the
+counterterm becomes a known quantity: @sec-viscous-eft shows that a
+viscosity $\nu$ is a speed of sound $c_s^2 = \nu D$.
 
 ## The one-point distribution
 
@@ -161,6 +363,13 @@ which drops from 1 at low $k$ to 0 where memory of the initial conditions is
 lost. For the Zel'dovich dynamics it is a Gaussian, $r(k) \simeq e^{-k^2\sigma_v^2 D^2/2}$,
 and for the adhesion model the viscosity adds further damping: compare the
 two directly by changing $\nu$.
+
+**Lattices and streaks.** The amplitude and phase maps themselves are not
+random. Before shell crossing they are superpositions of the harmonic
+lattices of @eq-lattice, one per pair of dominant initial modes, with
+phases varying linearly across each lattice; afterwards they are dominated
+by the streaks of the straight walls and the linear phases of the nodes of
+the adhesion tessellation (@sec-lattice).
 
 Everything in this chapter is a statement about the *same* field seen in the
 two spaces of [Chapter 4](04-two-spaces.qmd): the real-space picture shows

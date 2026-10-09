@@ -286,3 +286,41 @@ pub fn tophat_smooth(grid: &Grid, eng: &mut FftEngine, f: &[f32], radius: f64) -
     }
     eng.inverse_to_real_f32(h)
 }
+
+// ---------------------------------------------------------------------------
+// Viscous (adhesion-model) second-order kernel
+
+/// Second-order Eulerian density kernel of the viscous Burgers / adhesion
+/// dynamics (density defined through the inverse map, 1+δ = det(I - D∇∇Φ)):
+///
+///   δ̂₂(k) = D² ∫ F₂^ν(k₁,k₂; ν, D) δ̂₀(k₁) δ̂₀(k₂),
+///   F₂^ν = [ ½ k² (k₁·k₂) W₂ + ½ (k₁²k₂² − (k₁·k₂)²) e^{-ν(k₁²+k₂²)D} ] / (k₁² k₂²),
+///   W₂   = [e^{-ν(k₁²+k₂²)D} − e^{-νk²D}] / (2ν (k₁·k₂) D)   (→ 1 as ν → 0),
+///
+/// which reduces to the Zel'dovich kernel F₂^ZA = ½ (k·k₁/k₁²)(k·k₂/k₂²) for ν → 0.
+/// The first-order propagator is e^{-νk²D}.
+pub fn f2_viscous(k1: [f64; 3], k2: [f64; 3], nu: f64, d: f64) -> f64 {
+    let k = add(&k1, &k2);
+    let k1s = dot(&k1, &k1);
+    let k2s = dot(&k2, &k2);
+    let ks = dot(&k, &k);
+    let k12 = dot(&k1, &k2);
+    if k1s < 1e-300 || k2s < 1e-300 { return 0.0; }
+    let e12 = (-nu * (k1s + k2s) * d).exp();
+    let w2 = if (nu * k12 * d).abs() < 1e-12 {
+        // limit: (e^{-νs D} − e^{-νk²D})/(2νk₁·k₂D) with k² − s = 2 k₁·k₂  →  e^{-νsD}·(1 - ...) ≈ e^{-ν s D}
+        e12
+    } else {
+        (e12 - (-nu * ks * d).exp()) / (2.0 * nu * k12 * d)
+    };
+    (0.5 * ks * k12 * w2 + 0.5 * (k1s * k2s - k12 * k12) * e12) / (k1s * k2s)
+}
+
+/// Gravitational F₂ (EdS), Zel'dovich F₂^ZA, or viscous F₂^ν: kind 0, 1, 2.
+pub fn f2_kernel(kind: u32, k1: [f64; 3], k2: [f64; 3], nu: f64, d: f64) -> f64 {
+    match kind {
+        0 => f_sym(&[k1, k2]),
+        1 => f_za(&[k1, k2]),
+        _ => f2_viscous(k1, k2, nu, d),
+    }
+}

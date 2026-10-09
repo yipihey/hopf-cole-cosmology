@@ -63,13 +63,43 @@ rest use the laboratory.
     and how their thickness scales with $\nu$. Compare with the multi-stream
     sheet density at the same $D$.
 
+11. **The viscous kernel.** Derive @eq-f2-viscous from the second cumulant
+    in @eq-cumulant. Then open the *Kernels* section with
+    $\mathbf k_1 = (2,0)$, $\mathbf k_2 = (0,3)$ and sweep $\nu$ at
+    $D = 0.2$: show that the measured $\mathbf k_1+\mathbf k_2$ and
+    $\mathbf k_1-\mathbf k_2$ kernels of the Hopf–Cole density follow the
+    two branches of $\mathcal W(\pm 2\nu D\,|\mathbf k_1\cdot\mathbf k_2|)$,
+    and explain why for orthogonal waves the two branches coincide. Repeat
+    with $\mathbf k_2 = (2,2)$.
+
+12. **The third cumulant.** Write $F_3^\nu$ for parallel wave vectors
+    $\mathbf k_1 = \mathbf k_2 = \mathbf k_3$ (the $3\mathbf k_1$ harmonic)
+    using the third cumulant of @eq-cumulant, check its $\nu\to0$ limit
+    against $F_3^{\rm ZA}$ of @eq-fza, and compare with the $3\mathbf k_1$
+    amplitude read off the Fourier map of the Hopf–Cole density at small
+    $D$.
+
+13. **Lattice and phases.** Two plane waves at an oblique angle, order 1,
+    $D$ just below $D_{\rm sc}$. Read the amplitudes of the harmonics
+    $(n,m)$ off the Fourier map and compare with @eq-lattice; verify that
+    the phases are linear in $(n,m)$. Then switch to a Gaussian field with a
+    large smoothing scale, identify the two or three dominant initial modes
+    in the linear amplitude map, and locate their lattice in the evolved
+    one.
+
+14. **Counterterm from viscosity.** With a Gaussian field and the Hopf–Cole
+    density as the "truth", fit $c_s^2$ for $\nu$ from $10^{-5}$ to
+    $10^{-3}$ at fixed $D$ and $R$. Plot $c_s^2$ against $\nu D$ and find
+    the range over which @eq-viscous-counterterm holds; explain what
+    happens when $k_\nu = (\nu D)^{-1/2}$ enters the fitting range.
+
 ## The 3D laboratory
 
-11. **One loop in 3D.** $64^3$, order 4, $D$ chosen so that
+15. **One loop in 3D.** $64^3$, order 4, $D$ chosen so that
     $D\,\sigma_\Psi/R \approx 0.3$. Compare measured and one-loop spectra;
     estimate $k_{\rm NL}$ where $D^4 P_{22} = D^2 P_0$ and compare with the
     scale where the two curves separate.
 
-12. **Dimension dependence.** Compare $P_{13}/P_0$ in 2D and 3D for the
+16. **Dimension dependence.** Compare $P_{13}/P_0$ in 2D and 3D for the
     same $P_0(k)$ shape. Which is more negative, and why does the dimension
     enter through $\sigma_v^2$?

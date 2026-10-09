@@ -60,6 +60,7 @@ shaders, so even $128^3$ follows the $D$ slider.
 | | Fourier | $\log|\hat\delta(\mathbf k)|$ and phase maps of the selected field, $\log|\hat\psi(\mathbf k)|$ |
 | Legendre lab | source potential | Hopf–Cole run on the Zel'dovich potential, on the $n$LPT longitudinal potential (Legendre transform of the $n$LPT map, @sec-legendre), or with the first-order transverse correction; difference maps and spectral ratios against the sheet |
 | PDFs | diameter | one-point distributions of $\log_{10}(1+\delta)$ for every method at the grid scale and in top-hat spheres (discs) of the chosen diameter in cells, with Gaussian and lognormal references and moments |
+| Kernels | sweep | two-plane-wave kernel check: harmonic amplitudes at $\mathbf k_1$, $\mathbf k_1\pm\mathbf k_2$, $2\mathbf k_{1,2}$ measured from the Hopf–Cole density and the sheet, divided by $D^2$ and the initial amplitudes, against the viscous, Zel'dovich and gravitational $F_2$ (@sec-viscous-kernels); sweep over $D$ or $\nu$ |
 | Statistics | $P(k)$ | measured for sheet / CIC / Hopf–Cole / linear, with 1-loop SPT and ZA predictions |
 | | $r(k)$ | cross-correlation with the linear field |
 | | EFT fit | $c_s^2$ from $P_{\rm sheet} - P_{\rm 1\text{-}loop}$ for $k < k_{\max}$ |
@@ -77,7 +78,11 @@ shaders, so even $128^3$ follows the $D$ slider.
    voids empty. Orders 3 and 4 change little before shell crossing; the
    order-4 source map shows where the series is working hardest.
 4. **Mode coupling.** Two plane waves; watch the harmonics in the amplitude
-   map; make them parallel.
+   map; make them parallel. Open the *Kernels* section: the measured
+   second-order kernel of the Hopf–Cole density follows the viscous
+   $F_2^\nu$ (Zel'dovich as $\nu\to0$), the 2LPT sheet the gravitational
+   $F_2$ with its tidal term; sweep $\nu$ to see the damping $e^{-\nu k^2 D}$
+   that the EFT would call $c_s^2 = \nu D$.
 5. **The loop and the cutoff.** Gaussian field, order 4, $D \sim 0.3$. The
    measured $P(k)$ departs from linear theory at high $k$; the 1-loop curve
    follows it up to some $k$; the EFT counterterm extends the agreement.

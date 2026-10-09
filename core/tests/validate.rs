@@ -622,3 +622,40 @@ fn tophat_deconvolution_matches_direct_spectrum() {
     println!("k={:.1}: raw/deconvolved {:.3}", praw.k[last], praw.p[last] / pdec.p[last]);
     assert!(praw.p[last] / pdec.p[last] < 0.7);
 }
+
+#[test]
+fn viscous_kernel_limits_and_two_plane_waves() {
+    use hcc_core::spectra::{f2_viscous, f_za};
+    use hcc_core::ics::Preset;
+    use hcc_core::hopfcole::HcMethod;
+    let k1 = [2.0 * std::f64::consts::PI * 2.0, 0.0, 0.0];
+    let k2 = [0.0, 2.0 * std::f64::consts::PI * 3.0, 0.0];
+    // ν → 0 limit is the Zel'dovich kernel
+    let za = f_za(&[k1, k2]);
+    let v0 = f2_viscous(k1, k2, 1e-9, 0.3);
+    assert!((v0 - za).abs() < 1e-6, "{v0} vs {za}");
+    // two plane waves: the (k1+k2) harmonic of the Hopf–Cole density equals D² A1 A2 F2^ν(k1,k2;ν,D) + O(D⁴)
+    let n = 128usize;
+    let mut c = Cosmo::new(2, n, 1.0);
+    let (a1, a2) = (0.3f64, 0.3f64);
+    c.set_ic_preset(Preset::PlaneWaves { modes: vec![([2, 0, 0], a1, 0.0), ([0, 3, 0], a2, 0.0)] }, 0.0, 0.0);
+    c.build_lpt(2);
+    let d = 0.2f64;
+    for &nu in &[1e-5, 3e-4, 1e-3, 3e-3] {
+        let hc = c.hopf_cole(d, nu, HcMethod::RealSpace { refine: 2 });
+        let fh = c.eng.forward_real_f32(&hc.delta);
+        let amp = (fh[c.grid.ravel([2, 3, 0])] / c.grid.size as f64).re * 2.0; // cos amplitude of the (2,3) mode
+        let pred = d * d * a1 * a2 * f2_viscous(k1, k2, nu, d);
+        let za_pred = d * d * a1 * a2 * za;
+        println!("ν={nu:.0e}: measured (2,3) amplitude {amp:.5}, viscous prediction {pred:.5} (ratio {:.4}), inviscid ZA {za_pred:.5}", amp / pred);
+        assert!((amp / pred - 1.0).abs() < 0.08, "ν={nu}: {amp} vs {pred}");
+    }
+    // and at order 2 the sheet shows the gravitational F2 (tidal term) instead
+    let sheet = c.sheet_density_exact(d, 2, n, true, 1e4);
+    let ds: Vec<f32> = sheet.iter().map(|v| v - 1.0).collect();
+    let fh = c.eng.forward_real_f32(&ds);
+    let amp2 = (fh[c.grid.ravel([2, 3, 0])] / c.grid.size as f64).re * 2.0;
+    let grav = d * d * a1 * a2 * hcc_core::spectra::f_sym(&[k1, k2]);
+    println!("2LPT sheet (2,3) amplitude {amp2:.5}, gravitational prediction {grav:.5} (ratio {:.4}); ZA {za_pred:.5}", amp2 / grav, za_pred = d * d * a1 * a2 * za);
+    assert!((amp2 / grav - 1.0).abs() < 0.08);
+}

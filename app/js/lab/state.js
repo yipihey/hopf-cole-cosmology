@@ -35,7 +35,7 @@ export function makeDefaults(mode = 2) {
     perf: 'auto',           // performance preset: auto (decided after the GPU probe) | lite | full
     om: 1,                  // flat LCDM matter density (1 = EdS)
     // layout
-    vis: 'fs',              // visible sections: f = fields, s = spectra, l = Legendre lab, p = PDFs, e = explain
+    vis: 'fs',              // visible sections: f = fields, s = spectra, l = Legendre lab, p = PDFs, k = kernels, e = explain
     // 2D field panels: [kind, sub, cmap, log]  ('' = default)
     slots: [[ENV.lite ? 'sheetcpu' : 'sheetgpu', ENV.lite ? '' : 'both', '', ''], ['hc', '', '', ''], ['fabs', 'sheet', '', ''], ['fphase', 'sheet', '', '']],
     same: true, rmin: 0.1, rmax: 30,
@@ -49,6 +49,8 @@ export function makeDefaults(mode = 2) {
     ser: mode === 3 ? ['lin', 'cic', 'sheetp1', 'hc', 'hcdual', 'spt'] : ['lin', 'sheet', 'sheetp1', 'hc', 'hcdual', 'spt'], km: 30,
     // PDFs: top-hat diameter in grid cells
     pd: 10,
+    // Kernels lab: variable of the sweep plot (D | nu)
+    kx: 'D',
     // Legendre lab: which sheet is the reference of the difference maps (plain | p1 = vertex-interpolated, mass-conserving | x, xp1 = exact clipped P0 / P1 | nu = NUFFT density of the refined map)
     sref: 'plain',
   };
@@ -109,6 +111,7 @@ const SCHEMA = [
   ['rf', 'rf', 'enum', [1, 2, 4]],
   ['dw', 'dw', 'bool'],
   ['pd', 'pd', 'int', [2, 64]],
+  ['kx', 'kx', 'str', ['D', 'nu']],
   ['sref', 'lr', 'str', ['plain', 'p1', 'x', 'xp1', 'nu']],
 ];
 

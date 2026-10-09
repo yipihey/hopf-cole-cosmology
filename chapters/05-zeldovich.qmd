@@ -127,6 +127,28 @@ exactly (the laboratory checks this to better than $10^{-3}$ for a plane wave).
 Inside shocks $\nabla\mathbf u \sim -1/\nu$ and @eq-density-hc produces the
 thin, dense walls of the adhesion model.
 
+The late-time geometry follows from the Hopf–Lax formula @eq-hopf-lax
+alone [@kida1979; @vergassola1994; @gurbatov2012]. As $D$ grows the parabola
+in $\min_{\mathbf q}[-\varphi(\mathbf q) + |\mathbf x-\mathbf q|^2/2D]$
+flattens, and the minimum is attained at one of a shrinking set of
+Lagrangian "winners" $\mathbf q_i$, the highest peaks of the initial
+potential. Eulerian space is tiled by the cells in which one winner holds:
+inside cell $i$ the flow is the pure expansion $\mathbf u = (\mathbf x-\mathbf q_i)/D$
+and the density is exactly zero, since $\det(\mathbf 1 - D
+abla
+abla\Phi) = \det(\mathbf 1-\mathbf 1)$;
+all the mass sits on the cell boundaries, where two winners tie,
+$|\mathbf x-\mathbf q_i|^2/2D - \varphi(\mathbf q_i) = |\mathbf x-\mathbf q_j|^2/2D - \varphi(\mathbf q_j)$.
+These are *straight* lines (planes in 3D) perpendicular to
+$\mathbf q_i-\mathbf q_j$: the cosmic web of the adhesion model is a
+weighted Voronoi (Laguerre) tessellation of the initial potential maxima,
+with walls on the faces, filaments on the edges and nodes at the vertices.
+This geometry has a direct Fourier signature, discussed in
+[Chapter 7](07-mode-coupling.qmd), @sec-lattice. Perturbatively, before
+any of this happens, the adhesion model has its own mode-coupling kernels,
+derived there from the cumulant expansion of @eq-adhesion-hc
+(@sec-viscous-kernels).
+
 ```{=html}
 <div class="hcc-widget" data-widget="zeldovich1d"></div>
 <script type="module" src="../app/js/widgets.js"></script>

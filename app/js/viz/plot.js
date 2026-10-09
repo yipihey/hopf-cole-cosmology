@@ -51,7 +51,7 @@ export class LinePlot {
 
   /**
    * @param {{x:ArrayLike<number>, y:ArrayLike<number>, label?:string, color?:string, dash?:string,
-   *          width?:number, points?:boolean, line?:boolean, opacity?:number}[]} series
+   *          width?:number, points?:boolean, hollow?:boolean, line?:boolean, opacity?:number}[]} series
    */
   setSeries(series) { this.series = series; }
 
@@ -176,7 +176,7 @@ export class LinePlot {
         if (d) el('path', { d, fill: 'none', stroke: color, 'stroke-width': s.width ?? 1.5, 'stroke-dasharray': s.dash, 'stroke-opacity': op, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, plot);
       }
       if (s.points) {
-        const g = el('g', { fill: color, 'fill-opacity': op }, plot);
+        const g = el('g', s.hollow ? { fill: 'none', stroke: color, 'stroke-width': 1.5, 'stroke-opacity': op } : { fill: color, 'fill-opacity': op }, plot);
         for (let i = 0; i < n; i++) if (ok(i)) el('circle', { cx: fmt(sx(s.x[i])), cy: fmt(sy(s.y[i])), r: s.radius ?? 2.5 }, g);
       }
     });
@@ -211,7 +211,7 @@ export class LinePlot {
     entries.forEach((e, row) => {
       const y = m.t + 14 + row * 16, color = e.s.color || PALETTE[e.k % PALETTE.length];
       if (e.s.line !== false) el('line', { x1: x0, x2: x0 + 20, y1: y - 4, y2: y - 4, stroke: color, 'stroke-width': e.s.width ?? 1.5, 'stroke-dasharray': e.s.dash, 'stroke-opacity': e.s.opacity ?? 1 }, g);
-      if (e.s.points) el('circle', { cx: x0 + 10, cy: y - 4, r: 2.5, fill: color }, g);
+      if (e.s.points) el('circle', e.s.hollow ? { cx: x0 + 10, cy: y - 4, r: 2.5, fill: 'none', stroke: color, 'stroke-width': 1.5 } : { cx: x0 + 10, cy: y - 4, r: 2.5, fill: color }, g);
       el('text', { x: x0 + 26, y, fill: 'currentColor' }, g, e.s.label);
     });
   }

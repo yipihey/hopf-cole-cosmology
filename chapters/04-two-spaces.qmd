@@ -30,7 +30,12 @@ u(x,t) = 2\nu \,\frac{\sum_{n\ge1} n\,I_n\!\left(\tfrac{1}{2\nu}\right) e^{-\nu 
 {I_0\!\left(\tfrac{1}{2\nu}\right) + 2\sum_{n\ge1} I_n\!\left(\tfrac{1}{2\nu}\right) e^{-\nu n^2 t}\cos nx},
 $$ {#eq-cole-series}
 
-which is also a nice numerical test.
+which is also a nice numerical test. The two maps are also the shortest
+route to the *perturbation theory* of Burgers' equation: expanding the
+logarithm in cumulants gives the mode-coupling kernels at finite viscosity
+in three lines, and in two dimensions the harmonics of several initial
+waves form a lattice with locked phases
+([Chapter 7](07-mode-coupling.qmd), @sec-viscous-kernels and @sec-lattice).
 
 ```{=html}
 <div class="hcc-widget" data-widget="modes1d"></div>

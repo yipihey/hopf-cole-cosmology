@@ -276,6 +276,28 @@ impl CosmoSim {
     }
     /// Window value W(k R) of the top-hat used by `tophat_smooth` (for GPU-side smoothing).
     pub fn tophat_window(&self, k: f64, radius_cells: f64) -> f64 { crate::spectra::tophat_window(self.inner.grid.dim, k * radius_cells * self.inner.grid.dx()) }
+    /// Second-order kernel F₂ for integer mode vectors m₁, m₂ (k = 2π m / L): kind 0 gravity, 1 Zel'dovich, 2 viscous(ν, D).
+    pub fn f2_kernel(&self, kind: u32, m1x: f64, m1y: f64, m1z: f64, m2x: f64, m2y: f64, m2z: f64, nu: f64, d: f64) -> f64 {
+        let kf = self.inner.grid.kf();
+        crate::spectra::f2_kernel(kind, [m1x * kf, m1y * kf, m1z * kf], [m2x * kf, m2y * kf, m2z * kf], nu, d)
+    }
+    /// Complex Fourier amplitudes of selected lattice modes of a real field: input flat integer
+    /// mode vectors [mx, my, mz]×n, output [re, im]×n normalized so that a field A cos(k·x) gives A/2.
+    pub fn mode_amplitudes(&mut self, f: &[f32], modes: &[i32]) -> Vec<f64> {
+        let grid = self.inner.grid.clone();
+        let fh = self.inner.eng.forward_real_f32(f);
+        let n = grid.n as i64;
+        let mut out = Vec::new();
+        for m in modes.chunks(3) {
+            let mut ijk = [0usize; 3];
+            let mut ok = true;
+            for a in 0..grid.dim { let v = m[a] as i64; if v.abs() > n / 2 { ok = false; } ijk[a] = v.rem_euclid(n) as usize; }
+            if !ok { out.push(f64::NAN); out.push(f64::NAN); continue; }
+            let c = fh[grid.ravel(ijk)] / grid.size as f64;
+            out.push(c.re); out.push(c.im);
+        }
+        out
+    }
     pub fn kf(&self) -> f64 { self.inner.grid.kf() }
     pub fn knyq(&self) -> f64 { self.inner.grid.knyq() }
 }

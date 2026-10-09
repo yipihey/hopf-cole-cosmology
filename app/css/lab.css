@@ -153,3 +153,12 @@ html { color-scheme: light dark; }
 /* direct sheet spectra and NUFFT density */
 .lab-dirinfo { font-variant-numeric: tabular-nums; }
 .lab-checks .hcc-select select { max-width: 8rem; }
+
+/* Kernels */
+.lab-kern-grid { grid-template-columns: repeat(auto-fit, minmax(max(24rem, 49%), 1fr)); }
+.lab-kern-noic { margin: 0.3rem 0; }
+.lab-kern-noic[hidden], .lab-kern-main[hidden] { display: none; }
+.lab-kern-table td:nth-child(n+3) { text-align: right; }
+.lab-kern-name { display: flex; align-items: center; gap: 0.35rem; }
+.lab-kern-im { font-size: 0.65rem; color: var(--hcc-muted); }
+.lab-kern-readout { margin: 0.5rem 0 0; line-height: 1.4; }
