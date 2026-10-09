@@ -44,6 +44,14 @@ shaders, so even $128^3$ follows the $D$ slider.
 
 ## Controls
 
+Every line plot in the laboratory (and every plot widget in the chapters)
+is interactive: the mouse wheel zooms around the cursor (over the $x$ or
+$y$ axis strip it zooms that axis only), dragging pans, a double click
+resets, and the small toolbar under each plot switches either axis between
+linear and logarithmic scaling and accepts typed axis ranges. A zoomed view
+persists while the data change, so one can watch a feature at fixed axes
+while dragging $D$.
+
 | Group | Control | Meaning |
 |---|---|---|
 | Initial conditions | shape | power law $k^n$, BBKS or Eisenstein–Hu CDM-like shape; two plane waves; a single peak |

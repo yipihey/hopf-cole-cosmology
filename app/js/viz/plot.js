@@ -44,10 +44,191 @@ export class LinePlot {
       style: `display:block;width:100%;height:auto;max-width:${W}px;overflow:visible;color:inherit;font:12px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif`,
     });
     container.appendChild(this.svg);
+    // interactive view (overrides the caller's axes until reset): wheel = zoom, drag = pan, double-click = reset,
+    // toolbar = lin/log toggles and editable ranges
+    this.view = { xlim: null, ylim: null, xlog: null, ylog: null };
+    this._lastDefaults = null;
+    this.interactive = opts.interactive !== false;
+    if (this.interactive) this._buildTools();
   }
 
   /** @param {{xlog?:boolean, ylog?:boolean, xlabel?:string, ylabel?:string, xlim?:number[], ylim?:number[], title?:string}} axes */
   setAxes(axes) { this.axes = { ...this.axes, ...axes }; }
+
+  /** Axes with the interactive overrides applied; a change of the caller's lin/log default drops the override of that axis. */
+  _effAxes() {
+    const A = this.axes, v = this.view;
+    const d = { xlog: !!A.xlog, ylog: !!A.ylog };
+    if (this._lastDefaults) {
+      if (this._lastDefaults.xlog !== d.xlog) { v.xlog = null; v.xlim = null; }
+      if (this._lastDefaults.ylog !== d.ylog) { v.ylog = null; v.ylim = null; }
+    }
+    this._lastDefaults = d;
+    return { ...A, xlog: v.xlog ?? d.xlog, ylog: v.ylog ?? d.ylog, xlim: v.xlim ?? A.xlim, ylim: v.ylim ?? A.ylim };
+  }
+
+  /** Forget zoom, pan and lin/log overrides. */
+  resetView() { this.view = { xlim: null, ylim: null, xlog: null, ylog: null }; this.draw(); }
+
+  // --- interaction ----------------------------------------------------------
+
+  _buildTools() {
+    const doc = document;
+    const bar = this.tools = doc.createElement('div');
+    bar.className = 'hcc-plot-tools';
+    bar.style.maxWidth = `${this.opts.width}px`;
+    bar.title = 'Wheel over the plot: zoom (over an axis: that axis only). Drag: pan. Double-click: reset.';
+    const mk = (tag, cls, parent, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; parent.appendChild(e); return e; };
+    const axisTools = (key, label) => {
+      const g = mk('span', 'hcc-pt-axis', bar);
+      mk('span', 'hcc-pt-label', g, label);
+      const b = mk('button', 'hcc-pt-btn', g, 'lin'); b.type = 'button'; b.title = `${label} axis: linear / logarithmic`;
+      b.addEventListener('click', () => this._toggleLog(key));
+      const lo = mk('input', 'hcc-pt-in', g); lo.type = 'text'; lo.inputMode = 'decimal'; lo.title = `${label} minimum`;
+      mk('span', 'hcc-pt-dash', g, '–');
+      const hi = mk('input', 'hcc-pt-in', g); hi.type = 'text'; hi.inputMode = 'decimal'; hi.title = `${label} maximum`;
+      const apply = () => this._setRange(key, parseFloat(lo.value), parseFloat(hi.value));
+      for (const inp of [lo, hi]) { inp.addEventListener('change', apply); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { apply(); inp.blur(); } }); }
+      return { b, lo, hi };
+    };
+    this._tx = axisTools('x', 'x');
+    this._ty = axisTools('y', 'y');
+    const r = mk('button', 'hcc-pt-btn', bar, 'reset'); r.type = 'button'; r.title = 'Reset zoom, ranges and scales';
+    r.addEventListener('click', () => this.resetView());
+    this._readout = mk('span', 'hcc-pt-readout', bar, '');
+    this.container.appendChild(bar);
+    this._bindEvents();
+  }
+
+  _syncTools() {
+    if (!this.tools || !this._scales) return;
+    const A = this._effAxes(), S = this._scales;
+    const f = (v) => Number.isFinite(v) ? String(+v.toPrecision(4)) : '';
+    this._tx.b.textContent = A.xlog ? 'log' : 'lin'; this._ty.b.textContent = A.ylog ? 'log' : 'lin';
+    if (document.activeElement !== this._tx.lo) this._tx.lo.value = f(S.x0);
+    if (document.activeElement !== this._tx.hi) this._tx.hi.value = f(S.x1);
+    if (document.activeElement !== this._ty.lo) this._ty.lo.value = f(S.y0);
+    if (document.activeElement !== this._ty.hi) this._ty.hi.value = f(S.y1);
+    const changed = this.view.xlim || this.view.ylim || this.view.xlog !== null || this.view.ylog !== null;
+    this.tools.classList.toggle('is-changed', !!changed);
+  }
+
+  _toggleLog(key) {
+    const A = this._effAxes();
+    const cur = key === 'x' ? A.xlog : A.ylog;
+    this.view[key + 'log'] = !cur;
+    const lim = this.view[key + 'lim'];
+    if (!cur && lim && lim[0] <= 0) this.view[key + 'lim'] = null;   // switching to log with a non-positive range: back to auto
+    this.draw();
+  }
+
+  _setRange(key, lo, hi) {
+    if (!Number.isFinite(lo) || !Number.isFinite(hi) || !(hi > lo)) { this._syncTools(); return; }
+    const A = this._effAxes();
+    if ((key === 'x' ? A.xlog : A.ylog) && lo <= 0) { this._syncTools(); return; }
+    this.view[key + 'lim'] = [lo, hi];
+    this.draw();
+  }
+
+  /** Pointer position in viewBox units. */
+  _pos(ev) {
+    const r = this.svg.getBoundingClientRect();
+    const k = this.opts.width / Math.max(1, r.width);
+    return { px: (ev.clientX - r.left) * k, py: (ev.clientY - r.top) * k };
+  }
+
+  /** Which region the pointer is in: 'plot', 'x' (x-axis strip), 'y' (y-axis strip) or null. */
+  _region(px, py) {
+    const S = this._scales; if (!S) return null;
+    const { m, pw, ph } = S;
+    const inX = px >= m.l && px <= m.l + pw, inY = py >= m.t && py <= m.t + ph;
+    if (inX && inY) return 'plot';
+    if (inX && py > m.t + ph && py <= this.opts.height) return 'x';
+    if (inY && px < m.l && px >= 0) return 'y';
+    return null;
+  }
+
+  /** Transform to/from axis space (log10 for log axes). */
+  _t(key) {
+    const A = this._effAxes(), log = key === 'x' ? A.xlog : A.ylog;
+    return log ? { f: Math.log10, g: (u) => Math.pow(10, u) } : { f: (v) => v, g: (u) => u };
+  }
+
+  /** Current limits of an axis in axis space. */
+  _lim(key) { const S = this._scales, t = this._t(key); return key === 'x' ? [t.f(S.x0), t.f(S.x1)] : [t.f(S.y0), t.f(S.y1)]; }
+
+  _zoomAxis(key, center, factor) {
+    const t = this._t(key), [a, b] = this._lim(key);
+    const c = t.f(center);
+    const na = c - (c - a) / factor, nb = c + (b - c) / factor;
+    if (!(nb > na) || !Number.isFinite(na) || !Number.isFinite(nb)) return;
+    if (Math.abs(nb - na) < 1e-9 * (Math.abs(c) + 1e-300)) return;
+    this.view[key + 'lim'] = [t.g(na), t.g(nb)];
+  }
+
+  _panAxis(key, frac) {
+    const t = this._t(key), [a, b] = this._lim(key);
+    const d = (b - a) * frac;
+    this.view[key + 'lim'] = [t.g(a + d), t.g(b + d)];
+  }
+
+  _bindEvents() {
+    const svg = this.svg;
+    svg.style.touchAction = 'pan-y';
+    svg.addEventListener('wheel', (ev) => {
+      const { px, py } = this._pos(ev);
+      const reg = this._region(px, py);
+      if (!reg || !this._scales) return;
+      ev.preventDefault();
+      const S = this._scales;
+      const factor = Math.exp(-Math.sign(ev.deltaY) * Math.min(1, Math.abs(ev.deltaY) / 100) * 0.25);
+      const xc = S.x0 === undefined ? 0 : this._t('x').g(this._lim('x')[0] + (px - S.m.l) / S.pw * (this._lim('x')[1] - this._lim('x')[0]));
+      const yc = this._t('y').g(this._lim('y')[0] + (S.m.t + S.ph - py) / S.ph * (this._lim('y')[1] - this._lim('y')[0]));
+      if (reg === 'plot' || reg === 'x') this._zoomAxis('x', xc, factor);
+      if (reg === 'plot' || reg === 'y') this._zoomAxis('y', yc, factor);
+      this.draw();
+    }, { passive: false });
+    let drag = null;
+    svg.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      const { px, py } = this._pos(ev);
+      const reg = this._region(px, py);
+      if (!reg) return;
+      drag = { reg, px, py, moved: false };
+      svg.setPointerCapture(ev.pointerId);
+    });
+    svg.addEventListener('pointermove', (ev) => {
+      const { px, py } = this._pos(ev);
+      if (drag) {
+        const S = this._scales;
+        const dx = px - drag.px, dy = py - drag.py;
+        if (Math.abs(dx) + Math.abs(dy) < 1) return;
+        drag.moved = true;
+        if (drag.reg === 'plot' || drag.reg === 'x') this._panAxis('x', -dx / S.pw);
+        if (drag.reg === 'plot' || drag.reg === 'y') this._panAxis('y', dy / S.ph);
+        drag.px = px; drag.py = py;
+        svg.style.cursor = 'grabbing';
+        this.draw();
+        return;
+      }
+      const reg = this._region(px, py);
+      svg.style.cursor = reg === 'plot' ? 'crosshair' : reg ? 'ew-resize' : '';
+      if (reg === 'y') svg.style.cursor = 'ns-resize';
+      if (this._readout) {
+        if (reg === 'plot') {
+          const S = this._scales;
+          const x = this._t('x').g(this._lim('x')[0] + (px - S.m.l) / S.pw * (this._lim('x')[1] - this._lim('x')[0]));
+          const y = this._t('y').g(this._lim('y')[0] + (S.m.t + S.ph - py) / S.ph * (this._lim('y')[1] - this._lim('y')[0]));
+          this._readout.textContent = `x = ${+x.toPrecision(4)}, y = ${+y.toPrecision(4)}`;
+        } else this._readout.textContent = '';
+      }
+    });
+    const end = (ev) => { if (!drag) return; drag = null; svg.style.cursor = ''; try { svg.releasePointerCapture(ev.pointerId); } catch (e) { /* ignore */ } };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
+    svg.addEventListener('pointerleave', () => { if (!drag && this._readout) this._readout.textContent = ''; });
+    svg.addEventListener('dblclick', (ev) => { ev.preventDefault(); this.resetView(); });
+  }
 
   /**
    * @param {{x:ArrayLike<number>, y:ArrayLike<number>, label?:string, color?:string, dash?:string,
@@ -61,7 +242,7 @@ export class LinePlot {
   /** Serialized SVG (e.g. for download). */
   toSVGString() { return new XMLSerializer().serializeToString(this.svg); }
 
-  destroy() { this.svg.remove(); }
+  destroy() { this.svg.remove(); if (this.tools) this.tools.remove(); }
 
   // --- hooks overridden by WaterfallPlot ------------------------------------
   _drawSeries() { return this.series; }
@@ -100,7 +281,7 @@ export class LinePlot {
 
   /** (Re)render the SVG. */
   draw() {
-    const A = this.axes, svg = this.svg, W = this.opts.width, H = this.opts.height;
+    const A = this._effAxes(), svg = this.svg, W = this.opts.width, H = this.opts.height;
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     svg.setAttribute('aria-label', A.title || 'plot');
     const series = this._drawSeries();
@@ -200,6 +381,7 @@ export class LinePlot {
     if (A.ylabel) el('text', { transform: `translate(14 ${m.t + ph / 2}) rotate(-90)`, 'text-anchor': 'middle', fill: 'currentColor' }, svg, A.ylabel);
 
     this._legend(series, m, pw);
+    this._syncTools();
   }
 
   _legend(series, m, pw) {

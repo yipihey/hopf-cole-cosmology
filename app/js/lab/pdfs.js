@@ -226,7 +226,11 @@ export class PdfLab {
         series.push({ x: xs, y: Float64Array.from(xs, (x) => gaussX(x, ref.meanX, ref.varX)), label: `lognormal (${refM === 'cic' ? 'CIC' : 'sheet'})`, color: '#8a8f98', width: 1.6, dash: '7 3' });
         lnNote = `lognormal: ⟨ln(1+δ)⟩ = ${fmtNum(ref.meanX * LN10, 3)}, σ² = ${fmtNum(ref.varLn, 3)}`;
       }
-      pan.plot.setAxes({ xlog: false, ylog: true, xlabel: 'log₁₀(1+δ)', ylabel: 'p(log₁₀(1+δ))', xlim: [X0, X1], ylim: YLIM });
+      // x range: where any measured density exceeds 10 × the floor of the y axis, padded by two bins (the bins stay fixed)
+      let xlo = Infinity, xhi = -Infinity;
+      for (const r of rows) if (r.m !== 'lin') for (let i = 0; i < NBIN; i++) if (r.st.dens[i] > YLIM[0] * 10) { xlo = Math.min(xlo, CENTERS[i]); xhi = Math.max(xhi, CENTERS[i]); }
+      const xlim = xlo < xhi ? [Math.max(X0, xlo - 2 * DX), Math.min(X1, xhi + 2 * DX)] : [X0, X1];
+      pan.plot.setAxes({ xlog: false, ylog: true, xlabel: 'log₁₀(1+δ)', ylabel: 'p(log₁₀(1+δ))', xlim, ylim: YLIM });
       pan.plot.setSeries(series);
       pan.plot.setMarkers([]);
       pan.plot.draw();
