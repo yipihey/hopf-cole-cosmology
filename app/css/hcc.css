@@ -54,7 +54,7 @@
 .hcc-plot-tools.is-changed .hcc-pt-btn:last-of-type { border-color: var(--hcc-accent, #0072B2); color: var(--hcc-accent, #0072B2); }
 .hcc-with-bar { display: flex; gap: 0.5rem; align-items: stretch; }
 .hcc-with-bar > .hcc-stage { position: relative; flex: 1 1 auto; min-width: 0; }
-.hcc-with-bar > canvas.hcc-colorbar { flex: 0 0 auto; width: 84px; height: auto; aspect-ratio: auto; align-self: stretch; }
+.hcc-with-bar > canvas.hcc-colorbar { flex: 0 0 auto; width: 84px; height: auto; min-height: 0; aspect-ratio: auto; align-self: stretch; contain: size; }  /* contain: size — the bar's pixel buffer is sized from its rendered height (× devicePixelRatio), and without containment that intrinsic size would grow the row on Retina displays */
 .hcc-note { color: var(--hcc-muted); font-size: 0.8125rem; margin: 0.25rem 0; }
 .hcc-badge { display: inline-block; font-size: 0.7rem; padding: 0 0.4rem; border-radius: 3px; border: 1px solid var(--hcc-border); color: var(--hcc-muted); vertical-align: middle; margin-left: 0.4rem; }
 
