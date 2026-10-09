@@ -1,5 +1,8 @@
 /target
 /core/target
+/api
+/_variables.yml
+/app/css/brand.css
 /_site
 /.quarto
 /app/pkg

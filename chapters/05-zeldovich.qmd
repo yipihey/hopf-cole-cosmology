@@ -16,7 +16,7 @@ $$
 $$ {#eq-lagrangian-map}
 
 Mass conservation then gives the Eulerian density for free: a Lagrangian
-volume element $d^dq$ is mapped to $d^dx = J\,d^dq$ with the Jacobian
+volume element $d^dq$ is mapped to $d^dx = J\,d^dq$ with the Jacobian{{< src lpt::Lpt::jacobian >}}
 $J = \det(\partial\mathbf x/\partial\mathbf q) = \det(\mathbf 1 + \nabla_q\boldsymbol\Psi)$,
 so
 
@@ -122,8 +122,8 @@ $$
 = \det\!\big(\mathbf 1 - D\,\nabla\nabla\Phi\big) .
 $$ {#eq-density-hc}
 
-Before shell crossing and as $\nu \to 0$ this equals the Zel'dovich density
-exactly (the laboratory checks this to better than $10^{-3}$ for a plane wave).
+Before shell crossing and as $\nu \to 0$ this equals the Zel'dovich density{{< src hopfcole::hopf_cole_solve >}}
+exactly (the laboratory checks this to better than $10^{-3}$ for a plane wave{{< test hopf_cole_matches_zeldovich_sheet "to 10⁻³" >}}).
 Inside shocks $\nabla\mathbf u \sim -1/\nu$ and @eq-density-hc produces the
 thin, dense walls of the adhesion model.
 
@@ -163,6 +163,8 @@ sheet density @eq-density-jacobian, the adhesion density from
 @eq-density-hc at the chosen $\nu$, and the inviscid Hopf–Lax density, in
 which the fold has become a $\delta$-function. Increase $D$ past
 $D_{\rm sc}$ to see pancakes form; then raise $\nu$ to see them thicken.
+
+{{< lab "o=1&D=0.7&nu=1e-4&v=f" "The same experiment in 2D" >}}
 :::
 
 ## Hopf–Cole is a Legendre transform {#sec-legendre}
@@ -189,7 +191,7 @@ and run the same machinery. Through second order the displacement is exactly
 a gradient, so this returns the *exact* 2LPT Eulerian density before shell
 crossing, on the Eulerian grid and without particles. At third and fourth
 order the small transverse part $\boldsymbol\Psi_T$ (about $10^{-3}$ of the
-longitudinal one) breaks the gradient structure; it can be restored to first
+longitudinal one) breaks the gradient structure{{< src Cosmo::hopf_cole_lpt >}}{{< test hopf_cole_lpt_legendre "Legendre" >}}; it can be restored to first
 order by correcting the inverse map, $\mathbf q(\mathbf x) \simeq \mathbf q_L(\mathbf x) - \boldsymbol\Psi_T(\mathbf q_L(\mathbf x))$.
 
 ### The dual sheet: a mass-conserving density from the inverse map
@@ -200,7 +202,7 @@ inverse map itself, $\mathbf q(\mathbf x) = \mathbf x - D\,\mathbf u(\mathbf x)$
 point. The mass inside an Eulerian cell is then simply the Lagrangian volume
 of the cell's *preimage*, the polygon (2D) or hexahedron (3D) spanned by
 $\mathbf q$ at the cell's corners. These preimages tile Lagrangian space, so
-mass is conserved exactly, and no derivative is ever taken: the corner
+mass is conserved exactly{{< src hopfcole::dual_sheet_density >}}{{< test dual_sheet_density "mass conserved" >}}, and no derivative is ever taken: the corner
 values of $\mathbf q$ stay accurate no matter how steep the map is, so
 peaks are not under-resolved the way the finite-difference Hessian
 under-resolves them. This is the exact mirror image of the phase-space

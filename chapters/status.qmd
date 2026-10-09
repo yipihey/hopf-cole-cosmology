@@ -1,0 +1,63 @@
+---
+title: "Status, reproducibility and how to cite"
+---
+
+## This build
+
+Rendered from commit [{{< var build.sha >}}](https://github.com/yipihey/hopf-cole-cosmology/commit/{{< var build.commit >}})
+of {{< var build.date >}} (rendered {{< var build.rendered >}}) with Quarto
+1.10, stable Rust and wasm-pack 0.13.1 by the
+[publish workflow](https://github.com/yipihey/hopf-cole-cosmology/actions/workflows/publish.yml).
+
+## What is verified, and where
+
+- **The numerical core** (`hcc-core`, Rust compiled to WebAssembly) has a
+  validation suite that `cargo test --release` runs on every push: the
+  $n$LPT recursion through fourth order by equation-of-motion residual
+  scaling in 2D and 3D, the 2LPT closed form, the exact $\Lambda$CDM growth
+  tables, Hopf–Cole against the Zel'dovich sheet, the dual and P1 sheets,
+  the exact clipped deposits against 70 fixtures of the Julia `R3D.jl`
+  port, the deposit-free spectra, the top-hat window deconvolution, the
+  viscous kernel and the phase statistics. Every claim in the text that
+  rests on one of these carries a ✓ badge linking to the test.
+- **The API documentation** of the core is published with the book at
+  [api/hcc_core](../api/hcc_core/index.html); the ⟨name⟩ marks in the text
+  link to the function that evaluates the equation next to them.
+- **The WebGPU compute path** of the 3D laboratory is checked against the
+  WebAssembly reference by a self-test page:
+  [gpu-test.html](../app/gpu-test.html?auto=1&val=32,64) (open it in a
+  WebGPU-capable browser; it reports every check).
+- **Citations** were verified against the NASA ADS before entering the
+  bibliography.
+
+## Lineage
+
+The text grew out of a lecture notebook on Fourier methods for Burgers'
+equation; the notebook is included:
+[solve_burgers_equation_FFT_2025.ipynb](../notebooks/solve_burgers_equation_FFT_2025.ipynb).
+
+## How to cite
+
+The repository carries a `CITATION.cff`; GitHub shows it as "Cite this
+repository". Until a DOI is minted, cite the repository and the commit above:
+
+```
+Abel, T. (2026). Hopf–Cole Cosmology: from Burgers' equation to the cosmic web, in your browser.
+https://yipihey.github.io/hopf-cole-cosmology/ (commit {{< var build.sha >}})
+```
+
+## Sharing a view of the laboratory
+
+Every state of the laboratory is encoded in the address bar (the part after
+`#`), so copying the URL shares the exact experiment, including the
+smoothing scale, the seed, the viscosity and which panels are shown. The
+*copy link* button does this; the preset menu lists the experiments of the
+[lab guide](08-lab.qmd). Plots download as SVG or CSV from their toolbars,
+field panels as PNG.
+
+## Annotating and discussing
+
+Pages carry the Hypothesis sidebar (top right): select any passage to
+annotate it, publicly or in a private group. Corrections and questions are
+welcome as [issues](https://github.com/yipihey/hopf-cole-cosmology/issues);
+every page has an *Edit this page* link.

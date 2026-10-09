@@ -63,6 +63,7 @@ On a periodic domain we can compute derivatives exactly for every resolved
 mode: $\widehat{u_x} = i k\,\hat u$ and $\widehat{u_{xx}} = -k^2 \hat u$. The
 time integration below is the notebook's method: evaluate the right-hand side
 in real space with Fourier derivatives and hand it to an ODE integrator.
+The interactive panels of these chapters use a Rust port of the same scheme{{< src burgers1d::Burgers1D >}}, an integrating-factor RK4 step.
 
 ```{python}
 #| code-fold: true

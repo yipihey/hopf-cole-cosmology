@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this text or its laboratory, please cite it as below."
+title: "Hopf–Cole Cosmology: from Burgers' equation to the cosmic web, in your browser"
+type: software
+authors:
+  - family-names: Abel
+    given-names: Tom
+    affiliation: "Stanford University / KIPAC"
+    orcid: "https://orcid.org/0000-0002-5969-1251"
+repository-code: "https://github.com/yipihey/hopf-cole-cosmology"
+url: "https://yipihey.github.io/hopf-cole-cosmology/"
+license: MIT
+date-released: 2026-10-09
+keywords:
+  - cosmology
+  - Burgers equation
+  - Hopf-Cole transform
+  - Lagrangian perturbation theory
+  - adhesion model

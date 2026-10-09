@@ -144,7 +144,7 @@ $$
 \exp\!\left[-\frac{1}{2\nu}\left(\Phi_0(y) + \frac{(x-y)^2}{2t}\right)\right].
 $$ {#eq-hopf-integral}
 
-This is the **Hopf integral**. The exponent is the action of a free particle
+This is the **Hopf integral**{{< src hopfcole::hopf_cole_solve >}}. The exponent is the action of a free particle
 that starts at $y$ with "initial potential" $\Phi_0(y)$ and arrives at $x$
 after time $t$ with kinetic energy $(x-y)^2/2t$; $2\nu$ plays the role of a
 temperature (or of $\hbar$). The velocity $u = \Phi_x$ is the gradient of the
@@ -157,7 +157,7 @@ free particle is Gaussian.
 
 As $\nu \to 0$ the integral @eq-hopf-integral is dominated by the point
 $y_\star(x,t)$ that minimizes the exponent (Laplace's method). The result is
-the **Hopf–Lax formula** (also called the Lax–Oleinik formula)
+the **Hopf–Lax formula**{{< src hopfcole::hopf_lax_1d >}} (also called the Lax–Oleinik formula)
 
 $$
 \Phi(x,t) = \min_y \left[\Phi_0(y) + \frac{(x-y)^2}{2t}\right], \qquad
@@ -203,10 +203,10 @@ Fourier method computes the convolution with relative accuracy $\sim 10^{-16}$
 step 4 is garbage. In double precision this limits the exponent range to
 $\Delta\Phi/2\nu \lesssim 30$; smaller viscosities require either more
 precision or a different algorithm. The cure, used throughout the laboratory,
-is to evaluate the convolution @eq-hopf-integral **in the log domain** with a
+is to evaluate the convolution @eq-hopf-integral **in the log domain**{{< src hopfcole::log_heat_convolve >}} with a
 log-sum-exp (the trick familiar from statistical mechanics and machine
 learning): the heat kernel is separable, so each axis costs one short
 log-sum-exp per grid point, and the method is stable all the way to
 $\nu \to 0$ where it turns into the discrete Hopf–Lax minimum
-@eq-hopf-lax. The next chapter looks more closely at what the two spaces
+@eq-hopf-lax. {{< test burgers_rk4_vs_hopf_cole "RK4 vs Hopf–Cole" >}} The next chapter looks more closely at what the two spaces
 buy us.

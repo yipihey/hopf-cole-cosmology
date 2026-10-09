@@ -1,0 +1,42 @@
+---
+title: "Notation and conventions"
+---
+
+Box units throughout: the periodic box has side $L = 1$, so the fundamental
+wavenumber is $k_f = 2\pi$ and the Nyquist wavenumber of an $N^d$ grid is
+$k_{\rm Nyq} = \pi N$. Densities are in units of the mean, $\rho/\bar\rho = 1+\delta$.
+
+| Symbol | Meaning | Where it is fixed |
+|---|---|---|
+| $u$, $\nu$, $t$ | Burgers velocity, viscosity and time in one dimension | [Chapter 1](01-burgers.qmd) |
+| $\Phi$, $\psi$ | velocity potential $u = \partial_x\Phi$ and the Hopf–Cole variable $\psi = e^{-\Phi/2\nu}$ | @eq-hc |
+| $D$ | linear growth factor, used as the clock ($D = a$ in Einstein–de Sitter) | [Chapter 5](05-zeldovich.qmd) |
+| $a$, $\Omega_m$ | scale factor and matter density of flat $\Lambda$CDM; $a(D)$ is tabulated from the growth equation | [Chapter 6](06-lpt.qmd) |
+| $\delta_0$, $\sigma_0$ | initial (linearly extrapolated to $D=1$) density contrast and its rms after smoothing; $\sigma_0 = 1$ makes $D$ the rms linear contrast | lab controls |
+| $R$ | Gaussian smoothing scale of $\delta_0$, $e^{-k^2R^2/2}$ | lab controls |
+| $\varphi$ | initial potential, $\nabla^2\varphi = \delta_0$ | @eq-za |
+| $\mathbf q$, $\mathbf x$, $\boldsymbol\Psi$ | Lagrangian and Eulerian positions, displacement $\mathbf x = \mathbf q + \sum_n D^n\boldsymbol\Psi^{(n)}$ | @eq-za |
+| $\Phi_v$ | cosmological velocity potential with $D$ as time, $\mathbf u = d\mathbf x/dD = \nabla\Phi_v$, $\Phi_v(D=0) = -\varphi$ | @eq-za-burgers |
+| $\nu$ | adhesion viscosity in box units$^2$; $\nu_{\rm eff}$ is the value the log-domain solver actually used | @eq-adhesion |
+| $J$ | Jacobian $\det\partial\mathbf x/\partial\mathbf q$; the sheet density is $\sum 1/|J|$ over streams | @eq-density-jacobian |
+| $D_{\rm sc}$ | growth factor of the first shell crossing of the chosen LPT order | lab readout |
+| $P(k)$, $P_0$ | power spectrum of the evolved and of the initial field, $\langle\hat\delta\hat\delta^*\rangle$ per mode | @eq-1loop |
+| $F_n$, $F_n^{\rm ZA}$, $F_n^\nu$ | gravitational, Zel'dovich and viscous mode-coupling kernels | @eq-f2, @eq-fza, @eq-f2-viscous |
+| $c_s^2$ | EFT counterterm coefficient; for the adhesion model $c_s^2 = \nu D$ | @eq-eft, @eq-viscous-counterterm |
+| $r(k)$ | cross-correlation coefficient with the linear field | @eq-rk |
+| $\theta$ | phase sum over a closed triangle | @eq-phase-sum |
+| $\mathcal W(x)$ | $(1-e^{-x})/x$, the viscous coupling weight | @eq-f2-viscous |
+
+**Signs and clocks.** The equation of motion is written in $D$, not in
+cosmic time, so the Zel'dovich velocity is $\mathbf u = \boldsymbol\Psi^{(1)} = -\nabla\varphi$
+and the adhesion model is Burgers' equation in $D$ with viscosity $\nu$. The
+Hopf–Cole variable for cosmology is $\psi_0 = \exp(\varphi/2\nu)$ and the heat
+equation runs for the "time" $\nu D$.
+
+**Two dimensions.** The 2D laboratory is the $z$-symmetric 3D universe: all
+LPT coefficients, kernels and growth functions are the three-dimensional
+ones, and the plane-wave and Gaussian initial conditions have $k_z = 0$.
+
+**Estimators.** Point-sampled sheet densities carry no window; cell-averaged
+estimators (exact deposits, the dual sheet) carry $\prod_a\mathrm{sinc}^2(k_a\Delta x/2)$,
+which the laboratory can divide out; cloud-in-cell carries the square of that.

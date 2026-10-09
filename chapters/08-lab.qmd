@@ -79,29 +79,36 @@ while dragging $D$.
 1. **Zel'dovich equals Hopf–Cole.** Order 1, small $\nu$ with the log-domain
    method, $D < D_{\rm sc}$: the sheet and Hopf–Cole density panels agree to
    the rasterization noise, and their power spectra coincide.
+   {{< lab "o=1&nu=1e-5&D=0.3&v=fs" "Open" >}}
 2. **Shell crossing.** Push $D$ past $D_{\rm sc}$. The sheet folds (wireframe
    view) and the density develops three-stream regions; the Hopf–Cole
    solution instead forms thin shocks whose thickness scales with
    $\sqrt{\nu D}$.
+   {{< lab "o=1&D=0.7&v=f&f=sheetgpu.wire_hc_sheetgpu.both_fabs.sheet" "Open" >}}
 3. **Higher orders.** Order 2 versus 1 at fixed $D$: filaments sharpen,
    voids empty. Orders 3 and 4 change little before shell crossing; the
    order-4 source map shows where the series is working hardest.
+   {{< lab "o=2&D=0.4&v=f" "Order 2" >}} {{< lab "o=4&D=0.4&v=f&f=sheetgpu.both_hc_lptsrc.4_fabs.sheet" "Order 4 with its source map" >}}
 4. **Mode coupling.** Two plane waves; watch the harmonics in the amplitude
    map; make them parallel. Open the *Kernels* section: the measured
    second-order kernel of the Hopf–Cole density follows the viscous
    $F_2^\nu$ (Zel'dovich as $\nu\to0$), the 2LPT sheet the gravitational
    $F_2$ with its tidal term; sweep $\nu$ to see the damping $e^{-\nu k^2 D}$
    that the EFT would call $c_s^2 = \nu D$.
+   {{< lab "ic=w&D=0.2&v=fk" "Open" >}}
 5. **The loop and the cutoff.** Gaussian field, order 4, $D \sim 0.3$. The
    measured $P(k)$ departs from linear theory at high $k$; the 1-loop curve
    follows it up to some $k$; the EFT counterterm extends the agreement.
    Now change $R$: the loop prediction and the fitted $c_s^2$ move together.
+   {{< lab "o=4&D=0.3&v=s&se=lin%2Csheetp1%2Cspt%2Ceft%2Cp22%2Cp13" "Open" >}}
 6. **Legendre.** Open the Legendre lab, order 2, $D < D_{\rm sc}$: the
    $n$LPT-potential density differs from the sheet only by the rasterization
    noise (shrinking with $N$), while the Zel'dovich Hopf–Cole density differs by
    the genuine 2LPT correction. At order 3 read off $\Psi_T/\Psi_L$.
+   {{< lab "o=2&D=0.3&v=fl&hs=lpt" "Open" >}}
 7. **Phases.** Compare the phase maps of the linear and evolved fields and
    the $r(k)$ curve at several $D$, for 4LPT and for Hopf–Cole at two values
    of $\nu$. Add the phase-only reconstruction panel and the phase-sum plot:
    the reconstruction traces the walls and nodes, and $\langle\cos\theta\rangle$
    grows from zero as the web forms.
+   {{< lab "o=4&D=0.8&v=fs&f=sheetx_fphaseonly.sheetx_fabs.sheetx_fphase.sheetx" "Open" >}}

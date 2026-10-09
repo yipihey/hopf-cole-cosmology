@@ -32,7 +32,7 @@ $\ell_{\rm diff} = \sqrt{\nu t}$ is the **diffusion length**.
 
 The same solution can be written without any mention of Fourier modes. On the
 infinite line the solution with a delta-function initial condition is the
-**heat kernel**
+**heat kernel**{{< src hopfcole::log_heat_convolve >}}
 
 $$
 G_t(x) = \frac{1}{\sqrt{4\pi\nu t}}\, e^{-x^2/4\nu t},

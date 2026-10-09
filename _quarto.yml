@@ -1,9 +1,14 @@
 project:
   type: book
   output-dir: _site
+  pre-render:
+    - scripts/build_info.py
+    - scripts/brand_to_css.py
   # Copied verbatim into _site (standalone app, WASM pkg, JS, shaders, CSS).
   resources:
     - app/**
+    - api/**
+    - notebooks/*.ipynb
 
 book:
   title: "Hopf–Cole Cosmology"
@@ -12,9 +17,9 @@ book:
   date: today
   site-url: https://yipihey.github.io/hopf-cole-cosmology/
   repo-url: https://github.com/yipihey/hopf-cole-cosmology
-  repo-actions: [issue]
+  repo-actions: [edit, source, issue]
+  repo-branch: main
   search: true
-  page-footer: "Hopf–Cole Cosmology · MIT License"
   navbar:
     right:
       - text: "Interactive Lab"
@@ -46,8 +51,22 @@ book:
         - chapters/08-lab.qmd
         - chapters/09-exercises.qmd
     - chapters/references.qmd
+  appendices:
+    - chapters/notation.qmd
+    - chapters/status.qmd
+  page-footer:
+    left: "Hopf–Cole Cosmology · MIT License"
+    right: "build {{< var build.sha >}} · {{< var build.date >}}"
 
 bibliography: chapters/references.bib
+
+citation:
+  type: book
+  author: "Tom Abel"
+  issued: 2026
+  url: https://yipihey.github.io/hopf-cole-cosmology/
+  publisher: "GitHub Pages"
+appendix-cite-as: [display, bibtex]
 
 format:
   html:
@@ -60,8 +79,14 @@ format:
     number-sections: true
     number-depth: 2
     code-fold: true
+    code-tools: true
     html-math-method: katex
     include-in-header: includes/head.html
+    date-modified: last-modified
+    comments:
+      hypothesis:
+        theme: clean
+        openSidebar: false
 
 execute:
   freeze: auto

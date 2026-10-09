@@ -13,7 +13,7 @@ $$
 F_n(\mathbf k_1,\dots,\mathbf k_n)\,\hat\delta_0(\mathbf k_1)\cdots\hat\delta_0(\mathbf k_n).
 $$ {#eq-spt}
 
-For gravity the kernels follow from the recursion of @goroff1986 [reviewed in @bernardeau2002];
+For gravity the kernels follow from the recursion of @goroff1986 [reviewed in @bernardeau2002]{{< src spectra::f_sym >}}{{< test spt_kernels "kernels" >}};
 the second-order one is
 
 $$
@@ -23,7 +23,7 @@ $$ {#eq-f2}
 
 or in real space $\delta^{(2)} = \tfrac57\delta_0^2 + \nabla\delta_0\cdot\nabla\varphi + \tfrac27\varphi_{,ij}\varphi_{,ij}$.
 For the Zel'dovich / Burgers dynamics of [Chapter 5](05-zeldovich.qmd) the
-kernels are simpler and factorize,
+kernels are simpler and factorize{{< src spectra::f_za >}},
 
 $$
 F_n^{\rm ZA}(\mathbf k_1,\dots,\mathbf k_n) = \frac{1}{n!}\prod_{i=1}^n \frac{\mathbf k\cdot\mathbf k_i}{k_i^2},
@@ -48,6 +48,8 @@ Zel'dovich harmonics agree. The *Kernels* section of the laboratory turns
 this into a measurement: it reads the harmonic amplitudes off the Fourier
 map and divides out $D^2$ and the initial amplitudes, so that what is
 plotted *is* the kernel (@sec-viscous-kernels).
+
+{{< lab "ic=w&D=0.3&v=f&f=sheetgpu.both_hc_fabs.sheet_fphase.sheet" "Two plane waves in the lab" >}}
 :::
 
 ## Viscous kernels: perturbation theory for the adhesion model {#sec-viscous-kernels}
@@ -154,14 +156,16 @@ Open the *Kernels* section with the two-plane-wave initial condition. The
 table lists, for $\mathbf k_1$, $\mathbf k_1\pm\mathbf k_2$, $2\mathbf k_1$
 and $2\mathbf k_2$, the kernel *measured* from the Hopf–Cole density and
 from the sheet, next to $F_2^\nu$, $F_2^{\rm ZA}$ and the gravitational
-$F_2$. Hopf–Cole follows @eq-f2-viscous at every $\nu$ (the core test
-checks it to $10^{-3}$); the sheet at order 1 gives the Zel'dovich value and
+$F_2$. Hopf–Cole follows @eq-f2-viscous at every $\nu${{< src spectra::f2_viscous >}} (the core test
+checks it to $10^{-3}${{< test viscous_kernel_limits_and_two_plane_waves "to 10⁻³" >}}); the sheet at order 1 gives the Zel'dovich value and
 at order 2 and above the gravitational one, $5/7$ for orthogonal waves
 instead of $1/2$. Sweep $D$ at fixed $\nu$ and the measured points slide down
 the dashed viscous curves; sweep $\nu$ at fixed $D$ and watch
 $\nu k^2 D$ become the only variable that matters. Keep $D$ well below
 $D_{\rm sc}$: third- and fourth-order harmonics contaminate the second-order
 modes in proportion to $D^2$.
+
+{{< lab "ic=w&D=0.2&v=fk" "Measure the kernel in the lab" >}}
 :::
 
 ### The whole lattice at once {#sec-lattice}
@@ -249,7 +253,7 @@ the fitting range.
 
 ## The power spectrum at one loop
 
-Average over Gaussian initial phases with $\langle\hat\delta_0\hat\delta_0^*\rangle = P_0(k)$.
+Average over Gaussian initial phases with $\langle\hat\delta_0\hat\delta_0^*\rangle = P_0(k)${{< src spectra::power_spectrum_hat >}}{{< test grf_power_spectrum_matches_input "GRF spectrum" >}}.
 To fourth order in $\delta_0$,
 
 $$
@@ -263,7 +267,7 @@ P_{13} = 6P_0(k)\!\int\!\frac{d^dq}{(2\pi)^d}\,F_3(\mathbf k,\mathbf q,-\mathbf 
 $$
 
 $P_{22}$ is the power *generated* at $k$ by pairs of modes; $P_{13}$ is the
-loss of coherence of the original mode. The laboratory evaluates both
+loss of coherence of the original mode. The laboratory evaluates both{{< src spectra::one_loop >}}
 integrals numerically for the actual input $P_0(k)$ (with its smoothing),
 in 2D or 3D, with gravitational or Zel'dovich kernels, and overlays them on
 the power spectrum *measured* from the evolved field. For the Zel'dovich
@@ -280,7 +284,7 @@ Fourier transform of a plane wave over a simplex has a closed form, the
 Hermite–Genocchi identity
 $\int_T e^{-i\mathbf k\cdot\mathbf x}\,d^d x = d!\,|T|\;\exp[s_0,\dots,s_d]$
 with $s_j = -i\mathbf k\cdot\mathbf v_j$ the vertex phases and
-$\exp[\cdots]$ the divided difference of the exponential (one extra repeated
+$\exp[\cdots]$ the divided difference of the exponential{{< src direct::direct_spectrum >}}{{< test direct_spectrum_matches_exact_deposit_at_low_k "vs exact deposit" >}} (one extra repeated
 node for a linear density profile), so $\hat\delta(\mathbf k)$ of the
 piecewise-linear sheet can be summed exactly over all simplices on any
 lattice mode: the "direct spectrum", which measures the sheet's own $k^{-3}$
@@ -289,14 +293,14 @@ Lagrangian form, $\hat\delta(\mathbf k) = \int d^dq\, e^{-i\mathbf k\cdot\mathbf
 for the smooth, spectrally refined map the integrand is a smooth periodic
 function of $\mathbf q$ and the trapezoidal sum over the refined grid
 converges exponentially. Evaluated as a type-1 non-uniform FFT, this
-"NUFFT density" counts all streams, has no facets, and converges with the
+"NUFFT density"{{< src direct::nufft_density >}}{{< test nufft_density_linear_and_refined "NUFFT" >}} counts all streams, has no facets, and converges with the
 refinement factor, which makes it the reference for the true spectrum of
 the map. When comparing with deposited fields remember their windows: a
 cell-averaged estimator (the exact deposits, the dual sheet) carries
 $\prod_a \mathrm{sinc}^2(k_a\Delta x/2)$ in its power spectrum, already
 $0.4$ per axis at the Nyquist frequency, and must be deconvolved before
 it can be compared with a deposit-free spectrum; point-sampled sheets and
-the direct and NUFFT spectra carry no window at all.
+the direct and NUFFT spectra carry no window at all{{< src sheet::tophat_cell_window >}}{{< test tophat_deconvolution_matches_direct_spectrum "deconvolution" >}}.
 
 ## Sensitivity to the cutoff and the EFT counterterm
 
@@ -335,7 +339,7 @@ the lognormal model of @coles1991. The shape depends on the
 smoothing scale: averaging over spheres of a few cells lowers the variance
 and pushes the distribution back towards a Gaussian, the central limit
 theorem at work. The laboratory's *PDFs* section compares the distributions
-of all its methods at the grid scale and in top-hat spheres (discs in 2D)
+of all its methods at the grid scale and in top-hat spheres (discs in 2D){{< src spectra::tophat_smooth >}}{{< test tophat_smoothing "top-hat" >}}
 of ten cells diameter. The sheet, which sums all streams, and the adhesion
 solutions, which collect the same mass into thin walls, populate the
 high-density tail differently, and the Zel'dovich approximation, which
@@ -352,7 +356,7 @@ make the phase evolution visible.
 compared with that of the linear field: on large scales the phases are
 inherited from the initial conditions, on small scales they decorrelate.
 
-**The cross-correlation coefficient** [closely related to the propagator of
+**The cross-correlation coefficient**{{< src Cosmo::cross_spectrum >}} [closely related to the propagator of
 @crocce2006]
 
 $$
@@ -373,7 +377,7 @@ the adhesion tessellation (@sec-lattice).
 
 **Phase statistics.** Two further diagnostics turn these pictures into
 numbers, and both have a literature. The *phase-only reconstruction*
-[@oppenheim1981; @chiang2000; @coles2000] keeps the phases and sets every
+[@oppenheim1981; @chiang2000; @coles2000] keeps the phases{{< src spectra::phase_only_field >}} and sets every
 amplitude to one before transforming back. On the lattice of @eq-lattice
 the phases are linear in $(n,m)$, so the sum over the lattice is a Dirac
 comb on the lines $\mathbf k_1\cdot\mathbf x = -\theta_1$ and
@@ -388,7 +392,7 @@ $$
 $$ {#eq-phase-sum}
 
 is uniformly distributed for a Gaussian field and develops a peak at
-$\theta = 0$ as structure forms. @matsubara2003 derived its distribution from
+$\theta = 0$ as structure forms{{< src spectra::phase_sum_hist >}}{{< test phase_statistics_lattice_and_gaussian "lattice and Gaussian" >}}. @matsubara2003 derived its distribution from
 the polyspectra, $p(\theta) \simeq \tfrac{1}{2\pi}\big[1 + b\cos\theta + \ldots\big]$
 with $b$ proportional to the normalized bispectrum, and
 @hikage2004 and @hikage2005 measured it in simulations and in SDSS
@@ -412,6 +416,8 @@ one for the linear field, peaked at $\theta = 0$ for the evolved ones, more
 so as $D$ grows and when weighted by the amplitudes (the distribution of the
 bispectrum phase). Raise $\nu$ and watch the Hopf–Cole peak soften: the
 heat kernel damps the harmonics but does not unlock their phases.
+
+{{< lab "o=2&D=0.8&v=fs&f=sheetx_fphaseonly.sheetx_fabs.sheetx_fphase.sheetx&ps=a" "Phases in the lab" >}}
 :::
 
 Everything in this chapter is a statement about the *same* field seen in the

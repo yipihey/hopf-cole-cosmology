@@ -29,10 +29,20 @@ jobs:
           workspaces: core
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.13.1
 
       - name: Build WASM module
         run: wasm-pack build core --target web --release --out-dir ../app/pkg
+
+      - name: Build Rust API documentation (linked from the text)
+        run: |
+          cargo doc --no-deps --release --manifest-path core/Cargo.toml
+          rm -rf api && cp -r core/target/doc api
+
+      - name: Check provenance links
+        run: python3 scripts/check_links.py
 
       - name: Set up Quarto
         uses: quarto-dev/quarto-actions/setup@v2
