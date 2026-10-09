@@ -95,11 +95,19 @@ rest use the laboratory.
 
 ## The 3D laboratory
 
-15. **One loop in 3D.** $64^3$, order 4, $D$ chosen so that
+15. **Phase sums.** Gaussian field, order 2. Measure $\langle\cos\theta\rangle$
+    of the phase sum for the sheet density at $D = 0.1, 0.2, 0.4, 0.6$ and
+    plot it against $D$; compare the growth with the prediction of
+    @matsubara2003 using the tree-level bispectrum built from @eq-f2. Then
+    repeat for the Hopf–Cole density at three values of $\nu$ and explain,
+    from @eq-lattice and the propagator @eq-viscous-propagator, why the
+    viscosity lowers $\langle\cos\theta\rangle$ only through the amplitudes.
+
+16. **One loop in 3D.** $64^3$, order 4, $D$ chosen so that
     $D\,\sigma_\Psi/R \approx 0.3$. Compare measured and one-loop spectra;
     estimate $k_{\rm NL}$ where $D^4 P_{22} = D^2 P_0$ and compare with the
     scale where the two curves separate.
 
-16. **Dimension dependence.** Compare $P_{13}/P_0$ in 2D and 3D for the
+17. **Dimension dependence.** Compare $P_{13}/P_0$ in 2D and 3D for the
     same $P_0(k)$ shape. Which is more negative, and why does the dimension
     enter through $\sigma_v^2$?

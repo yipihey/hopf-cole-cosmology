@@ -10,7 +10,7 @@ export const METHODS = [0, 1, 2, 4];
 export const OMEGA_M = [1, 0.3, 0.25, 0.4];     // 1 = Einstein-de Sitter (exact D^n growth)
 
 export const SLOT_KINDS = [
-  'sheetgpu', 'sheetcpu', 'sheetp1gpu', 'sheetp1cpu', 'sheetx', 'sheetxp1', 'nufft', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed',
+  'sheetgpu', 'sheetcpu', 'sheetp1gpu', 'sheetp1cpu', 'sheetx', 'sheetxp1', 'nufft', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'fphaseonly', 'psihat', 'speed',
 ];
 
 export function defaultN(mode) { return mode === 3 ? 64 : (ENV.lite ? 128 : 256); }
@@ -46,6 +46,8 @@ export function makeDefaults(mode = 2) {
     dm: 128, rf: 2,
     // deconvolve the top-hat cell window of the cell-averaged estimators (exact sheet deposits, Hopf–Cole dual sheet) in P(k)
     dw: true,
+    // phase sums plot (Spectra): n = unweighted (Hikage et al.), a = amplitude-weighted (bispectrum phase)
+    psw: 'n', psk: 16,      // psk = k_max of the triangle sides in units of k_f
     ser: mode === 3 ? ['lin', 'cic', 'sheetp1', 'hc', 'hcdual', 'spt'] : ['lin', 'sheet', 'sheetp1', 'hc', 'hcdual', 'spt'], km: 30,
     // PDFs: top-hat diameter in grid cells
     pd: 10,
@@ -107,6 +109,8 @@ const SCHEMA = [
   ['l1', 'l1', 'bool'], ['l2', 'l2', 'bool'],
   ['ser', 'se', 'list'],
   ['km', 'km', 'num', [1, 5000]],
+  ['psw', 'ps', 'str', ['n', 'a']],
+  ['psk', 'pk', 'enum', [8, 16, 32, 64]],
   ['dm', 'dm', 'int', [32, 512]],
   ['rf', 'rf', 'enum', [1, 2, 4]],
   ['dw', 'dw', 'bool'],

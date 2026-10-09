@@ -57,12 +57,13 @@ shaders, so even $128^3$ follows the $D$ slider.
 | | Hopf–Cole method | Fourier multiplier (shows the dynamic-range failure) or log-domain kernel with 1–4× refinement |
 | Views | field | sheet density (triangles in 2D, tetrahedra in 3D), CIC density, Hopf–Cole density, linear density, velocity potential, $\ln\psi$, Jacobian, LPT sources |
 | | GPU compute (3D) | runs positions, CIC deposit, Hopf–Cole and the FFTs on the GPU (WebGPU compute shaders) so that $128^3$ responds live to the $D$ slider |
-| | Fourier | $\log|\hat\delta(\mathbf k)|$ and phase maps of the selected field, $\log|\hat\psi(\mathbf k)|$ |
+| | Fourier | $\log|\hat\delta(\mathbf k)|$ and phase maps of the selected field, $\log|\hat\psi(\mathbf k)|$, and the phase-only reconstruction (unit amplitudes, original phases), which peaks on the skeleton of the web |
 | Legendre lab | source potential | Hopf–Cole run on the Zel'dovich potential, on the $n$LPT longitudinal potential (Legendre transform of the $n$LPT map, @sec-legendre), or with the first-order transverse correction; difference maps and spectral ratios against the sheet |
 | PDFs | diameter | one-point distributions of $\log_{10}(1+\delta)$ for every method at the grid scale and in top-hat spheres (discs) of the chosen diameter in cells, with Gaussian and lognormal references and moments |
 | Kernels | sweep | two-plane-wave kernel check: harmonic amplitudes at $\mathbf k_1$, $\mathbf k_1\pm\mathbf k_2$, $2\mathbf k_{1,2}$ measured from the Hopf–Cole density and the sheet, divided by $D^2$ and the initial amplitudes, against the viscous, Zel'dovich and gravitational $F_2$ (@sec-viscous-kernels); sweep over $D$ or $\nu$ |
 | Statistics | $P(k)$ | measured for sheet / CIC / Hopf–Cole / linear, with 1-loop SPT and ZA predictions |
 | | $r(k)$ | cross-correlation with the linear field |
+| | phase sums | distribution of $\varphi(\mathbf k_1)+\varphi(\mathbf k_2)-\varphi(\mathbf k_1+\mathbf k_2)$ over closed triangles with $|\mathbf k| \le k_{\max}$ for the selected fields, unweighted or weighted by the amplitudes (bispectrum phase), with $\langle\cos\theta\rangle$ |
 | | EFT fit | $c_s^2$ from $P_{\rm sheet} - P_{\rm 1\text{-}loop}$ for $k < k_{\max}$ |
 
 ## Suggested experiments
@@ -93,4 +94,6 @@ shaders, so even $128^3$ follows the $D$ slider.
    the genuine 2LPT correction. At order 3 read off $\Psi_T/\Psi_L$.
 7. **Phases.** Compare the phase maps of the linear and evolved fields and
    the $r(k)$ curve at several $D$, for 4LPT and for Hopf–Cole at two values
-   of $\nu$.
+   of $\nu$. Add the phase-only reconstruction panel and the phase-sum plot:
+   the reconstruction traces the walls and nodes, and $\langle\cos\theta\rangle$
+   grows from zero as the web forms.

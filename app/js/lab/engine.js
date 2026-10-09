@@ -909,6 +909,20 @@ export class Engine {
   get nbins() { return NBINS[this.dim]; }
 
   /** Binned P(k); when deconv is true the estimator's own window is divided out (CIC: window 1; exact deposits and dual sheet: top-hat cell average, window 2). */
+  /** Phase-only reconstruction of the named field (unit phasors for 0 < |k| <= kmax in rad/L, kmax <= 0: all modes), unit rms, native layout. */
+  phaseOnly(which, P, kmax = 0) {
+    return this.memo(['phonly', ...this.fieldKey(which, P), +kmax.toFixed(6)], () => this.time('phase-only map', () => this.sim.phase_only(this.delta(which, P), kmax)));
+  }
+  /**
+   * Distribution of the phase sum theta = phi(k1) + phi(k2) - phi(k3=k1+k2) over random closed triangles with kmin <= |k| <= kmax:
+   * {pdf, wpdf (bispectrum-amplitude weighted), cos, wcos, n}, with the pdf normalised to 1/2pi for a uniform distribution.
+   */
+  phaseSums(which, P, kmin, kmax, nbins, nsamp, seed) {
+    return this.memo(['phsum', ...this.fieldKey(which, P), +kmin.toFixed(6), +kmax.toFixed(6), nbins, nsamp, seed], () => this.time('phase sums', () => {
+      const r = this.sim.phase_sum_hist(this.delta(which, P), kmin, kmax, nbins, nsamp, seed >>> 0);
+      return { pdf: r.slice(0, nbins), wpdf: r.slice(nbins, 2 * nbins), cos: r[2 * nbins], n: r[2 * nbins + 1], wcos: r[2 * nbins + 2] };
+    }));
+  }
   pk(which, P, deconv = false) {
     const win = Engine.windowOf(which, deconv);
     return this.memo(['pk', ...this.fieldKey(which, P), win], () => this.time('P(k)', () => {

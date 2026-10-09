@@ -132,6 +132,13 @@ export const CATALOG = {
     data: (e, P, sub) => e.fmaps(sub, P).phase,
     caption: (sub) => `Phase arg δ̂(k) of the ${OF_NAME[sub] || sub} density. Linear growth leaves the initial phases untouched; mode coupling makes the phases of generated modes depend on those of their parents.`,
   },
+  fphaseonly: {
+    label: 'phase-only reconstruction of …', cls: 'phaseonly', cmap: 'rdbu', unit: 'phase-only map [rms]', sf: true,
+    subs: { label: 'of', options: SUB_OF, def: 'sheet' },
+    opt: { label: 'k_max', title: 'Keep only the phases of the modes with |k| ≤ k_max (in units of the fundamental k_f = 2π/L); all = every mode.', options: [['', 'all modes'], ['2', '2 k_f'], ['4', '4 k_f'], ['8', '8 k_f'], ['16', '16 k_f'], ['32', '32 k_f']], def: '' },
+    data: (e, P, sub, opt) => e.phaseOnly(sub, P, Number(opt) > 0 ? Number(opt) * e.kf : 0),
+    caption: (sub, P, e, opt) => `Phase-only reconstruction of the ${OF_NAME[sub] || sub} density (Oppenheim & Lim 1981; Chiang & Coles 2000): every Fourier mode${Number(opt) > 0 ? ' with 0 < |k| ≤ ' + opt + ' k_f' : ''} is replaced by its unit phasor e^{iφ(k)} and transformed back, so the power spectrum is discarded and only the phases remain. Linear colour scale, ±3 rms (the map has unit rms; its overall sign is arbitrary). It peaks on the sharp structures of the field: pancakes, filaments and nodes, i.e. the skeleton of the web.`,
+  },
   psihat: {
     label: '|ψ̂(k)|', cls: 'psihat', cmap: 'viridis', unit: 'log₁₀|ψ̂|/max', fourier: true,
     data: (e, P) => e.hc(P).psihat, // already fft-shifted [ikx*n+iky]
@@ -144,7 +151,7 @@ export const CATALOG = {
   },
 };
 
-export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'sheetp1gpu', 'sheetp1cpu', 'sheetx', 'sheetxp1', 'nufft', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'psihat', 'speed'];
+export const KIND_ORDER = ['sheetgpu', 'sheetcpu', 'sheetp1gpu', 'sheetp1cpu', 'sheetx', 'sheetxp1', 'nufft', 'cic', 'hc', 'hcdual', 'lin', 'phi', 'lnpsi', 'invj', 'lptsrc', 'lptcurl', 'fabs', 'fphase', 'fphaseonly', 'psihat', 'speed'];
 
 /** Percentile-based range helpers for special classes. */
 export function psihatRange(arr) {

@@ -371,6 +371,49 @@ phases varying linearly across each lattice; afterwards they are dominated
 by the streaks of the straight walls and the linear phases of the nodes of
 the adhesion tessellation (@sec-lattice).
 
+**Phase statistics.** Two further diagnostics turn these pictures into
+numbers, and both have a literature. The *phase-only reconstruction*
+[@oppenheim1981; @chiang2000; @coles2000] keeps the phases and sets every
+amplitude to one before transforming back. On the lattice of @eq-lattice
+the phases are linear in $(n,m)$, so the sum over the lattice is a Dirac
+comb on the lines $\mathbf k_1\cdot\mathbf x = -\theta_1$ and
+$\mathbf k_2\cdot\mathbf x = -\theta_2$: the pancake positions. For a
+Gaussian field the same map peaks on the walls and nodes of the evolved
+web, with the contrast information gone, which is the cleanest demonstration
+that phases carry positions and amplitudes carry contrast. The *phase sum*
+over closed triangles,
+
+$$
+\theta(\mathbf k_1,\mathbf k_2) = \varphi(\mathbf k_1) + \varphi(\mathbf k_2) - \varphi(\mathbf k_1+\mathbf k_2),
+$$ {#eq-phase-sum}
+
+is uniformly distributed for a Gaussian field and develops a peak at
+$\theta = 0$ as structure forms. @matsubara2003 derived its distribution from
+the polyspectra, $p(\theta) \simeq \tfrac{1}{2\pi}\big[1 + b\cos\theta + \ldots\big]$
+with $b$ proportional to the normalized bispectrum, and
+@hikage2004 and @hikage2005 measured it in simulations and in SDSS
+galaxies; see also @wolstenhulme2015 for the three-point phase correlation
+function. On the lattice, $\theta$ is $0$ or $\pi$ exactly: the tree-level
+bispectrum has zero phase because the kernels $F_2$ of @sec-viscous-kernels
+are real, and the $n$-th cumulant of @eq-cumulant fixes the $n$-point phase
+closure in the same way. That phases shift in proportion to $k$ times the
+displacement was noticed early [@ryden1991; @scherrer1991; @soda1992], the
+universal growth of phase correlations in simulations is documented in
+@jain1998 and @watts2003, and the mechanism is the one written in
+@eq-lattice: a coherent displacement is a linear phase.
+
+::: {.callout-tip title="Try it: phases"}
+Choose the *phase-only reconstruction* panel in the laboratory for the
+Hopf–Cole or sheet density. With two plane waves at $D$ close to
+$D_{\rm sc}$ the map is a set of straight lines on the pancakes; with a
+Gaussian field it is the skeleton of the web. In the Spectra section the
+*phase sums* plot shows $2\pi\,p(\theta)$ for the selected fields: flat at
+one for the linear field, peaked at $\theta = 0$ for the evolved ones, more
+so as $D$ grows and when weighted by the amplitudes (the distribution of the
+bispectrum phase). Raise $\nu$ and watch the Hopf–Cole peak soften: the
+heat kernel damps the harmonics but does not unlock their phases.
+:::
+
 Everything in this chapter is a statement about the *same* field seen in the
 two spaces of [Chapter 4](04-two-spaces.qmd): the real-space picture shows
 walls, filaments and voids forming; the Fourier picture shows power flowing

@@ -13,6 +13,10 @@ export const DIRECT0_COLOR = '#d6336c';
 export const DIRECT1_COLOR = '#2b8a3e';
 export const NUFFT_COLOR = '#e8590c';
 
+/** Series of SERIES that are fields (the phase sums exist only for these; the analytic curves and the direct sheet spectra have no phases). */
+const PHASE_FIELDS = ['lin', 'sheet', 'sheetp1', 'sheetx', 'sheetxp1', 'nufft', 'cic', 'hc', 'hcdual'];
+const PH_NBINS = 36;
+
 const SERIES = [
   ['lin', 'linear theory'],
   ['sheet', 'sheet (measured)'],
@@ -79,6 +83,21 @@ export class Spectra {
     this.rPlot = new LinePlot(this.rHost, { width: 500, height: 380 });
     el('p', 'hcc-note lab-cap', rp, 'r(k) = P_{f,lin} / √(P_f P_lin) measures how much of the evolved field’s phase information still matches linear theory. The dashed curve is the Zel’dovich propagator exp(−k²σ_Ψ²D²/2), with σ_Ψ² the per-axis displacement variance of the grid modes (Gaussian ICs only). It equals r(k) only while the evolved power is still close to linear, and is only approximate once streams cross.');
 
+    // ---- phase sums panel
+    const hp = this.phPanel = el('div', 'hcc-panel lab-panel', grid);
+    el('div', 'hcc-title', hp, 'Phase sums');
+    const hc = el('div', 'hcc-controls lab-checks', hp);
+    this.pswSel = sel(hc, { label: 'weight', options: [['n', 'none'], ['a', 'amplitude']], value: S.psw,
+      title: 'none: every closed triangle counts equally (Hikage, Matsubara & Suto 2004). amplitude: weighted by |f(k1) f(k2) f(k1+k2)|, i.e. the distribution of the bispectrum phase.',
+      onChange: (v) => { S.psw = v === 'a' ? 'a' : 'n'; app.hashChanged(); this.drawIfReady(); } });
+    this.pskSel = sel(hc, { label: 'k_max', options: [8, 16, 32, 64].map((v) => [v, v + ' k_f']), value: S.psk,
+      title: 'Largest side |k1|, |k2|, |k1+k2| of the triangles, in units of the fundamental k_f = 2π/L (clipped to the Nyquist mode of the grid).',
+      onChange: (v) => { S.psk = Number(v); app.hashChanged(); this.drawIfReady(); } });
+    this.phHost = el('div', 'lab-plot', hp);
+    this.phPlot = new LinePlot(this.phHost, { width: 500, height: 380 });
+    this.phVals = el('div', 'hcc-note lab-phvals', hp);
+    el('p', 'hcc-note lab-cap', hp, 'Distribution of the phase sum θ = φ(k₁) + φ(k₂) − φ(k₁+k₂) over random closed triangles with all sides below the chosen k_max, shown as 2π p(θ): a Gaussian field gives the dotted line at 1 (⟨cos θ⟩ = 0), while phase-locked structure (the harmonics of a wave, pancakes, nodes) piles up at θ = 0 and raises ⟨cos θ⟩.');
+
     // ---- readouts
     const ro = this.roRow = el('div', 'hcc-controls lab-readouts', this.root);
     this.ro = {
@@ -102,12 +121,13 @@ export class Spectra {
     this.checks.cic.el.querySelector('.hcc-label').textContent = d3 ? 'CIC (measured, deconv.)' : 'CIC (deconv.)';
     this.checks.nufft.el.querySelector('.hcc-label').textContent = d3 ? 'NUFFT density (refined map; ≤ 64³, refine ≤ 2)' : 'NUFFT density (refined map)';
     this.dwCb.set(this.app.S.dw);
+    this.pswSel.set(this.app.S.psw); this.pskSel.set(this.app.S.psk);
     this.dmSl.set(this.app.S.dm); this.rfSel.set(this.app.S.rf);
     const ser = this.app.S.ser;
     for (const id of Object.keys(this.checks)) this.checks[id].set(ser.includes(id));
   }
 
-  markStale(b) { this.pPanel.classList.toggle('is-stale', b); this.rPanel.classList.toggle('is-stale', b); }
+  markStale(b) { this.pPanel.classList.toggle('is-stale', b); this.rPanel.classList.toggle('is-stale', b); this.phPanel.classList.toggle('is-stale', b); }
 
   wants() {
     const w = new Set(this.app.S.ser);
@@ -152,6 +172,7 @@ export class Spectra {
       t.push({ label: 'SPT 1-loop', heavy: true, fn: () => e.loop(P, 0) });
     }
     if (gaussian && w.has('za')) t.push({ label: 'Zel’dovich 1-loop', heavy: true, fn: () => e.loop(P, 1) });
+    if (PHASE_FIELDS.some((id) => w.has(id))) t.push({ label: 'phase sums', fn: () => this.phaseSums(P) });
     t.push({ label: 'plots', fn: () => this.draw(P) });
     return t;
   }
@@ -262,7 +283,64 @@ export class Spectra {
     this.rPlot.setSeries(rs);
     this.rPlot.setMarkers([{ x: e.knyq, label: 'k_Nyq', color: '#888' }, ...(P.R > 0 ? [{ x: 1 / P.R, label: '1/R', color: '#aa66cc' }] : [])]);
     this.rPlot.draw();
+    this.drawPhase(P, hcTag);
     this.markStale(false);
+  }
+
+  /** Series of the phase-sum plot: [id, label, colour] for the selected field series (same colours as P(k)). */
+  phaseSeries(P, hcTag = '') {
+    const e = this.app.eng, w = this.wants(), d3 = e.dim === 3, out = [];
+    const add = (id, label, color) => { if (w.has(id)) out.push({ id, label, color }); };
+    add('lin', 'linear theory', '#8a8f98');
+    add('sheet', d3 ? 'sheet (tetrahedra)' : 'sheet', d3 ? PALETTE[5] : PALETTE[0]);
+    add('sheetp1', d3 ? 'sheet P1 (tetrahedra)' : 'sheet P1', P1_COLOR);
+    add('sheetx', d3 ? 'sheet exact P0 (tetrahedra)' : 'sheet exact P0', EXACT0_COLOR);
+    add('sheetxp1', d3 ? 'sheet exact P1 (tetrahedra)' : 'sheet exact P1', EXACT1_COLOR);
+    if (w.has('nufft') && e.nufftInfo(P).ok) add('nufft', `NUFFT density (refine ${P.rf})`, NUFFT_COLOR);
+    add('cic', d3 ? 'CIC' : 'CIC', d3 ? PALETTE[0] : PALETTE[5]);
+    add('hc', 'Hopf–Cole' + hcTag, PALETTE[1]);
+    add('hcdual', 'Hopf–Cole dual sheet' + hcTag, DUAL_COLOR);
+    return out;
+  }
+
+  /** Triangle statistics of one field: cached per (field, k_max, bins, samples, seed); one WASM call. */
+  phaseOf(id, P) {
+    const e = this.app.eng, S = this.app.S;
+    // k_min = kf/2 only drops the mean mode (its phase is meaningless); k_max is S.psk in units of k_f, passed in rad/L
+    return e.phaseSums(id, P, 0.5 * e.kf, S.psk * e.kf, PH_NBINS, e.dim === 3 ? 20000 : 40000, S.seed);
+  }
+
+  /** Task: fill the phase-sum cache for the selected fields. */
+  async phaseSums(P) {
+    const e = this.app.eng;
+    for (const s of this.phaseSeries(P)) {
+      if (s.id !== 'lin') await e.need('analysis', s.id, P);
+      this.phaseOf(s.id, P);
+    }
+  }
+
+  drawPhase(P, hcTag = '') {
+    const S = this.app.S, e = this.app.eng, amp = S.psw === 'a';
+    const list = this.phaseSeries(P, hcTag), series = [];
+    this.phVals.textContent = '';
+    const dth = 2 * Math.PI / PH_NBINS;
+    const th = Float64Array.from({ length: PH_NBINS }, (_, i) => -Math.PI + (i + 0.5) * dth);
+    let top = 1;
+    for (const s of list) {
+      const r = this.phaseOf(s.id, P);
+      const y = Float64Array.from(amp ? r.wpdf : r.pdf, (v) => 2 * Math.PI * v);
+      for (const v of y) if (v > top) top = v;
+      series.push({ x: th, y, label: s.label, color: s.color, width: 1.8, opacity: 0.9 });
+      const row = el('span', 'lab-phval', this.phVals);
+      const sw = el('span', 'lab-phsw', row); sw.style.background = s.color;
+      el('span', null, row, `${s.label}: ⟨cos θ⟩ = ${r.n > 0 ? (amp ? r.wcos : r.cos).toFixed(3) : '–'}`);
+      row.title = `${Math.round(r.n).toLocaleString('en-US')} triangles`;
+    }
+    series.push({ x: Float64Array.of(-Math.PI, Math.PI), y: Float64Array.of(1, 1), label: 'Gaussian field', color: '#8a8f98', dash: '1 4', width: 1.8, line: true });
+    this.phPlot.setAxes({ xlog: false, ylog: false, xlabel: 'θ = φ(k₁) + φ(k₂) − φ(k₁+k₂)  [rad]', ylabel: amp ? '2π p(θ), amplitude-weighted' : '2π p(θ)', xlim: [-Math.PI, Math.PI], ylim: [0, Math.max(2, Math.min(top * 1.08, 40))] });
+    this.phPlot.setSeries(series);
+    this.phPlot.setMarkers([]);
+    this.phPlot.draw();
   }
 
   /** Update the numeric readouts (cheap; uses cached values only where expensive). */

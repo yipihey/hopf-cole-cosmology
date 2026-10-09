@@ -324,3 +324,84 @@ pub fn f2_kernel(kind: u32, k1: [f64; 3], k2: [f64; 3], nu: f64, d: f64) -> f64 
         _ => f2_viscous(k1, k2, nu, d),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Phase statistics
+
+/// Phase-only reconstruction (Oppenheim & Lim 1981; Chiang & Coles 2000): every Fourier mode with
+/// 0 < |k| ≤ kmax (kmax ≤ 0: all modes) is replaced by its unit phasor e^{iφ(k)} and the field is
+/// transformed back. Modes below 10⁻⁶ of the largest amplitude (round-off) are dropped. The result
+/// is normalized to unit rms (its amplitude is arbitrary).
+pub fn phase_only_field(grid: &Grid, eng: &mut FftEngine, f: &[f32], kmax: f64) -> Vec<f32> {
+    let mut fh = eng.forward_real_f32(f);
+    let amax = (1..grid.size).map(|i| fh[i].norm()).fold(0.0, f64::max);
+    let floor = (amax * 1e-6).max(1e-300);
+    for idx in 0..grid.size {
+        let k = grid.kvec(idx);
+        let kk = (k[0] * k[0] + k[1] * k[1] + k[2] * k[2]).sqrt();
+        let a = fh[idx].norm();
+        if kk == 0.0 || a < floor || (kmax > 0.0 && kk > kmax) { fh[idx] = C64::new(0.0, 0.0); } else { fh[idx] /= a; }
+    }
+    let mut out = eng.inverse_to_real_f32(fh);
+    let rms = (out.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>() / out.len() as f64).sqrt().max(1e-300);
+    for v in out.iter_mut() { *v = (*v as f64 / rms) as f32; }
+    out
+}
+
+/// Distribution of the phase sum θ = φ(k₁) + φ(k₂) − φ(k₁+k₂) over random closed triangles with
+/// kmin ≤ |k₁|, |k₂|, |k₁+k₂| ≤ kmax (Matsubara 2003; Hikage, Matsubara & Suto 2004); modes below
+/// 10⁻⁶ of the largest amplitude (round-off, e.g. off the lattice of a plane-wave field) are skipped.
+/// Returns the probability density on nbins equal bins of [−π, π) (uniform ⇒ 1/2π), then the same
+/// density with every triangle weighted by |f̂(k₁)f̂(k₂)f̂(k₁+k₂)| (the distribution of the bispectrum
+/// phase), then the mean of cos θ, the number of triangles used, and the weighted mean of cos θ.
+pub fn phase_sum_hist(grid: &Grid, fhat: &[C64], kmin: f64, kmax: f64, nbins: usize, nsamp: usize, seed: u64) -> Vec<f64> {
+    use crate::rng::Rng;
+    let n = grid.n as i64;
+    let mmax = ((kmax / grid.kf()).floor() as i64).min(n / 2).max(1);
+    let mut rng = Rng::new(seed);
+    let mut hist = vec![0.0f64; nbins];
+    let mut whist = vec![0.0f64; nbins];
+    let (mut count, mut sc, mut wnum, mut wden) = (0usize, 0.0f64, 0.0f64, 0.0f64);
+    let kvec_of = |m: [i64; 3]| -> f64 { let kf = grid.kf(); (((m[0] * m[0] + m[1] * m[1] + m[2] * m[2]) as f64).sqrt()) * kf };
+    let idx_of = |m: [i64; 3]| -> usize {
+        let mut ijk = [0usize; 3];
+        for a in 0..grid.dim { ijk[a] = m[a].rem_euclid(n) as usize; }
+        grid.ravel(ijk)
+    };
+    let draw = |rng: &mut Rng| -> [i64; 3] {
+        let mut m = [0i64; 3];
+        for a in 0..grid.dim { m[a] = (rng.uniform() * (2 * mmax + 1) as f64).floor() as i64 - mmax; }
+        m
+    };
+    let amax = (1..grid.size).map(|i| fhat[i].norm()).fold(0.0, f64::max);
+    let floor = (amax * 1e-6).max(1e-300);
+    let mut tries = 0usize;
+    while count < nsamp && tries < nsamp * 50 {
+        tries += 1;
+        let m1 = draw(&mut rng);
+        let m2 = draw(&mut rng);
+        let m3 = [m1[0] + m2[0], m1[1] + m2[1], m1[2] + m2[2]];
+        if m3.iter().any(|v| v.abs() > n / 2) { continue; }
+        let (k1, k2, k3) = (kvec_of(m1), kvec_of(m2), kvec_of(m3));
+        if k1 < kmin || k2 < kmin || k3 < kmin || k1 > kmax || k2 > kmax || k3 > kmax { continue; }
+        let (a, b, c) = (fhat[idx_of(m1)], fhat[idx_of(m2)], fhat[idx_of(m3)]);
+        if a.norm() < floor || b.norm() < floor || c.norm() < floor { continue; }
+        let prod = a * b * c.conj();
+        let th = prod.arg();                       // in (−π, π]
+        let bin = (((th + std::f64::consts::PI) / (2.0 * std::f64::consts::PI)) * nbins as f64).floor() as usize;
+        hist[bin.min(nbins - 1)] += 1.0;
+        whist[bin.min(nbins - 1)] += prod.norm();
+        sc += th.cos();
+        wnum += prod.re; wden += prod.norm();
+        count += 1;
+    }
+    let dth = 2.0 * std::f64::consts::PI / nbins as f64;
+    let norm = (count as f64 * dth).max(1e-300);
+    let mut out: Vec<f64> = hist.iter().map(|h| h / norm).collect();
+    let wnorm = (wden * dth).max(1e-300);
+    out.extend(whist.iter().map(|h| h / wnorm));
+    out.push(if count > 0 { sc / count as f64 } else { 0.0 });
+    out.push(count as f64);
+    out.push(if wden > 0.0 { wnum / wden } else { 0.0 });
+    out
+}

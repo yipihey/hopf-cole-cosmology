@@ -298,6 +298,16 @@ impl CosmoSim {
         }
         out
     }
+    /// Phase-only reconstruction of a field (unit phasors for 0 < |k| ≤ kmax, kmax ≤ 0 = all modes), unit rms.
+    pub fn phase_only(&mut self, f: &[f32], kmax: f64) -> Vec<f32> {
+        let grid = self.inner.grid.clone();
+        crate::spectra::phase_only_field(&grid, &mut self.inner.eng, f, kmax)
+    }
+    /// Phase-sum distribution of a field: [pdf on nbins bins of [−π, π)..., amplitude-weighted pdf (nbins)..., ⟨cos θ⟩, n_triangles, weighted ⟨cos θ⟩].
+    pub fn phase_sum_hist(&mut self, f: &[f32], kmin: f64, kmax: f64, nbins: usize, nsamp: usize, seed: u32) -> Vec<f64> {
+        let fh = self.inner.eng.forward_real_f32(f);
+        crate::spectra::phase_sum_hist(&self.inner.grid, &fh, kmin, kmax, nbins, nsamp, seed as u64)
+    }
     pub fn kf(&self) -> f64 { self.inner.grid.kf() }
     pub fn knyq(&self) -> f64 { self.inner.grid.knyq() }
 }

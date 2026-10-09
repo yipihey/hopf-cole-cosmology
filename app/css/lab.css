@@ -162,3 +162,8 @@ html { color-scheme: light dark; }
 .lab-kern-name { display: flex; align-items: center; gap: 0.35rem; }
 .lab-kern-im { font-size: 0.65rem; color: var(--hcc-muted); }
 .lab-kern-readout { margin: 0.5rem 0 0; line-height: 1.4; }
+
+/* phase sums: <cos θ> readouts under the plot */
+.lab-phvals { display: flex; flex-wrap: wrap; gap: 0.15rem 1.1rem; margin-top: 0.3rem; font-variant-numeric: tabular-nums; }
+.lab-phval { display: inline-flex; align-items: center; gap: 0.35rem; }
+.lab-phsw { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 2px; }

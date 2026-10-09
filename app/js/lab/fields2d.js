@@ -26,7 +26,8 @@ class Slot {
     const sub = c[1] || (def.subs ? def.subs.def : '');
     const cmap = c[2] || def.cmap;
     const log = c[3] === '' ? !!def.log : c[3] === '1';
-    return { kind, def, sub, cmap, log };
+    const opt = c[3] !== '' && def.opt && def.opt.options.some((o) => o[0] === c[3]) ? c[3] : (def.opt ? def.opt.def : '');   // kinds with a per-panel option keep it in the 4th slot
+    return { kind, def, sub, cmap, log, opt };
   }
   save(patch) {
     const c = this.app.S.slots[this.idx];
@@ -47,6 +48,7 @@ class Slot {
     this.opts = el('div', 'lab-popts', root);
     this.subHost = el('span', 'lab-subhost', this.opts);
     this.cmapSel = sel(this.opts, { label: 'map', options: CMAPS, onChange: (v) => { this.save({ cmap: v }); this.redraw(); } });
+    this.optHost = el('span', 'lab-subhost', this.opts);
     this.logCb = checkbox(this.opts, { label: 'log', value: true, onChange: (v) => { this.save({ log: v ? '1' : '0' }); this.redraw(); } });
     const wb = el('div', 'hcc-with-bar', root);
     const stage = this.stage = el('div', 'hcc-stage', wb);
@@ -69,6 +71,10 @@ class Slot {
     this.cmapSel.set(cmap);
     this.logCb.set(log);
     this.logCb.el.hidden = def.cls !== 'density';
+    this.optHost.textContent = '';
+    if (def.opt) {
+      sel(this.optHost, { label: def.opt.label, options: def.opt.options, value: this.cfg.opt, title: def.opt.title, onChange: (v) => { this.save({ log: v }); this.app.runPanel(this.owner, this.idx); } });
+    }
     this.subHost.textContent = '';
     this.subSel = null;
     const gpuless = def.gpu && !this.app.gpu;
@@ -84,7 +90,7 @@ class Slot {
   /** True when the panel shows something derived from the Hopf-Cole solution (recomputed by the fast nu path). */
   dependsOnHc() {
     const { kind, sub } = this.cfg;
-    return ['hc', 'hcdual', 'phi', 'lnpsi', 'psihat', 'speed'].includes(kind) || ((kind === 'fabs' || kind === 'fphase') && (sub === 'hc' || sub === 'hcdual'));
+    return ['hc', 'hcdual', 'phi', 'lnpsi', 'psihat', 'speed'].includes(kind) || ((kind === 'fabs' || kind === 'fphase' || kind === 'fphaseonly') && (sub === 'hc' || sub === 'hcdual'));
   }
 
   isFast() { return this.cfg.def.gpu && this.app.gpu; }
@@ -120,7 +126,8 @@ class Slot {
     try {
       let { kind, def, sub, cmap, log } = this.cfg;
       this.syncHidden(def);
-      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG[def.cpu] : def).caption(sub, P, eng);
+      const opt = this.cfg.opt;
+      this.cap.textContent = (def.gpu && !this.app.gpu ? CATALOG[def.cpu] : def).caption(sub, P, eng, opt);
       this.note.hidden = true;
       const n = eng.n;
       if (def.gpu && this.app.gpu) {
@@ -136,15 +143,15 @@ class Slot {
       }
       const fv = await this.ensureFV();
       // NUFFT density (WASM): unavailable on grids where the refined fine grid would be too large
-      if (kind === 'nufft' || (def.fourier && sub === 'nufft')) {
+      if (kind === 'nufft' || ((def.fourier || def.sf) && sub === 'nufft')) {
         const ni = eng.nufftInfo(P);
         if (!ni.ok) { this.note.hidden = false; this.note.textContent = ni.note; this.markStale(false); return; }
       }
       // exact (clipped) sheet deposits come from the GPU clipper when available: make them resident before the synchronous getters run
-      const needF = def.need || ((def.fourier && Engine.isExact(sub)) ? sub : null);
+      const needF = def.need || (((def.fourier || def.sf) && Engine.isExact(sub)) ? sub : null);
       if (needF) await eng.need('field', needF, P);
-      const arr = drawDef.data(eng, P, sub);
-      if (needF) this.cap.textContent = def.caption(sub, P, eng);
+      const arr = drawDef.data(eng, P, sub, opt);
+      if (needF) this.cap.textContent = def.caption(sub, P, eng, opt);
       if (!arr || arr.length < n * n) throw new Error(`panel data has ${arr ? arr.length : 0} values, expected ${n * n}`);
       fv.setField(transpose2D(arr, n), n, n);
       fv.setColormap(cmap);
@@ -153,6 +160,7 @@ class Slot {
         case 'sym': fv.setRange(undefined, undefined, { symmetric: true }); break;
         case 'amp': fv.setRange(-6, 0); break;
         case 'phase': fv.setRange(-Math.PI, Math.PI); break;
+        case 'phaseonly': fv.setRange(-3, 3); break;     // unit-rms map: linear, ±3 rms
         case 'psihat': { const [a, b] = psihatRange(arr); fv.setRange(a, b); break; }
         default: fv.setRange();
       }

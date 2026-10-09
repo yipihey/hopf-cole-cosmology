@@ -659,3 +659,44 @@ fn viscous_kernel_limits_and_two_plane_waves() {
     println!("2LPT sheet (2,3) amplitude {amp2:.5}, gravitational prediction {grav:.5} (ratio {:.4}); ZA {za_pred:.5}", amp2 / grav, za_pred = d * d * a1 * a2 * za);
     assert!((amp2 / grav - 1.0).abs() < 0.08);
 }
+
+#[test]
+fn phase_statistics_lattice_and_gaussian() {
+    use hcc_core::ics::Preset;
+    use hcc_core::spectra::{phase_only_field, phase_sum_hist};
+    use hcc_core::hopfcole::HcMethod;
+    let n = 128usize;
+    let mut c = Cosmo::new(2, n, 1.0);
+    c.set_ic_preset(Preset::PlaneWaves { modes: vec![([2, 0, 0], 0.8, 0.7), ([1, 3, 0], 0.6, 2.1)] }, 0.0, 0.0);
+    c.build_lpt(1);
+    let hc = c.hopf_cole(0.8, 1e-5, HcMethod::RealSpace { refine: 2 });
+    // phase sums on the lattice are 0 or π: the pdf is concentrated in the bins around 0 and ±π
+    let fh = c.eng.forward_real_f32(&hc.delta);
+    let h = phase_sum_hist(&c.grid, &fh, 0.0, 8.0 * c.grid.kf(), 36, 20000, 1);
+    let nb = 36; let dth = 2.0 * std::f64::consts::PI / nb as f64;
+    let near = |i: usize| -> bool { let th = -std::f64::consts::PI + (i as f64 + 0.5) * dth; th.abs() < 0.3 || (th.abs() - std::f64::consts::PI).abs() < 0.3 };
+    // off-lattice modes carry only round-off amplitude and are skipped, so even the unweighted pdf is concentrated
+    let mass_near: f64 = (0..nb).filter(|&i| near(i)).map(|i| h[i] * dth).sum();
+    let wmass_near: f64 = (0..nb).filter(|&i| near(i)).map(|i| h[nb + i] * dth).sum();
+    println!("two waves: phase-sum mass within 0.3 of 0 or ±π = {mass_near:.3} unweighted, {wmass_near:.3} weighted (triangles {})", h[2 * nb + 1]);
+    assert!(wmass_near > 0.9);
+    assert!(mass_near > 0.9, "{mass_near}");
+    // the phase-only reconstruction peaks on the pancakes: at D=0.8 the density maxima and the phase-only maxima coincide
+    let po = phase_only_field(&c.grid, &mut c.eng, &hc.delta, 0.0);
+    let (mut imax, mut vmax) = (0usize, f32::MIN);
+    for (i, v) in hc.delta.iter().enumerate() { if *v > vmax { vmax = *v; imax = i; } }
+    let (mut jmax, mut wmax) = (0usize, f32::MIN);
+    for (i, v) in po.iter().enumerate() { if *v > wmax { wmax = *v; jmax = i; } }
+    let a = c.grid.unravel(imax); let b = c.grid.unravel(jmax);
+    let d = |x: usize, y: usize| -> i64 { let d = (x as i64 - y as i64).rem_euclid(n as i64); d.min(n as i64 - d) };
+    println!("density max at {:?}, phase-only max at {:?}", a, b);
+    assert!(d(a[0], b[0]) <= 2 && d(a[1], b[1]) <= 2);
+    // a Gaussian field has uniform phase sums
+    let mut g = Cosmo::new(2, n, 1.0);
+    g.set_ic_gaussian(hcc_core::ics::PkShape::PowerLaw { n: -1.0 }, 0.02, 7, 1.0);
+    let gh = g.delta0_hat.clone();
+    let hg = phase_sum_hist(&g.grid, &gh, 0.0, 20.0 * g.grid.kf(), 36, 40000, 2);
+    let maxdev = (0..nb).map(|i| (hg[i] * 2.0 * std::f64::consts::PI - 1.0).abs()).fold(0.0, f64::max);
+    println!("Gaussian: max |2π p(θ) − 1| = {maxdev:.3}, <cos θ> = {:.4}", hg[2 * nb]);
+    assert!(maxdev < 0.15 && hg[2 * nb].abs() < 0.03);
+}
