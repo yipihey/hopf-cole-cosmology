@@ -301,7 +301,7 @@ struct BinU { n: u32, deconv: u32, p0: u32, p1: u32, norm: f32 };
 @group(0) @binding(3) var<storage, read> perm: array<u32>;
 @group(0) @binding(4) var<storage, read> chunks: array<vec4<u32>>;
 @group(0) @binding(5) var<storage, read_write> partial: array<vec4<f32>>;
-var<workgroup> sh: array<vec3<f32>, 256>;
+var<workgroup> sh: array<vec4<f32>, 256>;
 
 fn sinc2(m: i32, n: u32) -> f32 {
   let x = 3.14159265358979 * f32(m) / f32(n);
@@ -309,13 +309,19 @@ fn sinc2(m: i32, n: u32) -> f32 {
   let s = sin(x) / x;
   return s * s;
 }
+// sinc(pi m / n): the top-hat (cell average) window of one axis, W = prod_a sinc(pi m_a / n)
+fn sinc1(m: i32, n: u32) -> f32 {
+  let x = 3.14159265358979 * f32(m) / f32(n);
+  if (abs(x) < 1e-6) { return 1.0; }
+  return sin(x) / x;
+}
 fn fftfreq(i: u32, n: u32) -> i32 { if (i < n / 2u) { return i32(i); } return i32(i) - i32(n); }
 
 @compute @workgroup_size(256)
 fn bin(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lid: u32) {
   let ch = chunks[wid.x];
   let n = bu.n;
-  var a = vec3<f32>(0.0);
+  var a = vec4<f32>(0.0);
   var i = ch.x + lid;
   loop {
     if (i >= ch.y) { break; }
@@ -323,11 +329,15 @@ fn bin(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) l
     let v = fh[e]; let g = rf[e];
     let plain = dot(v, v) * bu.norm;
     var dec = plain;
+    var th = plain;
     if (bu.deconv != 0u) {
-      let w = sinc2(fftfreq(e / (n * n), n), n) * sinc2(fftfreq((e / n) % n, n), n) * sinc2(fftfreq(e % n, n), n);
+      let fa = fftfreq(e / (n * n), n); let fb = fftfreq((e / n) % n, n); let fc = fftfreq(e % n, n);
+      let w = sinc2(fa, n) * sinc2(fb, n) * sinc2(fc, n);        // CIC window W_cic = prod sinc^2
       dec = plain / (w * w);
+      let wt = sinc1(fa, n) * sinc1(fb, n) * sinc1(fc, n);       // top-hat cell-average window W = prod sinc
+      th = plain / (wt * wt);
     }
-    a = a + vec3<f32>(dec, plain, (v.x * g.x + v.y * g.y) * bu.norm);
+    a = a + vec4<f32>(dec, plain, (v.x * g.x + v.y * g.y) * bu.norm, th);
     i = i + 256u;
   }
   sh[lid] = a;
@@ -336,7 +346,7 @@ fn bin(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) l
     if (lid < s) { sh[lid] = sh[lid] + sh[lid + s]; }
     workgroupBarrier();
   }
-  if (lid == 0u) { partial[wid.x] = vec4<f32>(sh[0], 0.0); }
+  if (lid == 0u) { partial[wid.x] = sh[0]; }
 }
 
 // max |f^|^2 over all cells -> bits of the (non-negative) float in a u32 (atomicMax is monotone)
@@ -764,8 +774,9 @@ export class GpuCosmo3D {
   /**
    * One forward FFT of (field - offset) and everything derived from it.
    * opts: {nbins = 40, offset = 0, maps = false, cross = false}.
-   * Returns {plain, dec, cross, maps}:
-   *   plain / dec: {k, p, n} (Float64Array) binned P(k) = L^3 |f^|^2 / N^2 (dec divides by the CIC window^2),
+   * Returns {plain, dec, th, cross, maps}:
+   *   plain / dec / th: {k, p, n} (Float64Array) binned P(k) = L^3 |f^|^2 / N^2 (dec divides by the CIC window^2 = prod sinc^4,
+   *   th by the top-hat cell-average window^2 = prod sinc^2(pi m_a / n)),
    *   cross: {k, p, n} of Re[f^ g^*] with the reference field of setReference() (or null),
    *   maps: {amp, phase} Float32Array n^2 (fft-shifted [ikx*n+iky], kz = 0 plane, amp = log10|f^|/max).
    */
@@ -798,10 +809,10 @@ export class GpuCosmo3D {
     const res = await readRegions(this.device, regions, enc);
     const part = new Float32Array(res[0]);
     // The kernel always deconvolves when bu.deconv = 1, so the 'dec' channel is dec and 'plain' is plain.
-    const sums = [new Float64Array(nbins), new Float64Array(nbins), new Float64Array(nbins)];
+    const sums = [new Float64Array(nbins), new Float64Array(nbins), new Float64Array(nbins), new Float64Array(nbins)];
     for (let c = 0; c < T.nchunk; c++) {
       const b = T.chunkBin[c];
-      sums[0][b] += part[4 * c]; sums[1][b] += part[4 * c + 1]; sums[2][b] += part[4 * c + 2];
+      sums[0][b] += part[4 * c]; sums[1][b] += part[4 * c + 1]; sums[2][b] += part[4 * c + 2]; sums[3][b] += part[4 * c + 3];
     }
     const pack = (s) => {
       let m = 0;
@@ -811,7 +822,7 @@ export class GpuCosmo3D {
       for (let b = 0; b < nbins; b++) if (T.cnt[b] > 0) { k[j] = T.ksum[b] / T.cnt[b]; p[j] = s[b] / T.cnt[b]; nn[j] = T.cnt[b]; j++; }
       return { k, p, n: nn };
     };
-    const out = { dec: pack(sums[0]), plain: pack(sums[1]), cross: cross ? pack(sums[2]) : null, maps: null };
+    const out = { dec: pack(sums[0]), plain: pack(sums[1]), th: pack(sums[3]), cross: cross ? pack(sums[2]) : null, maps: null };
     if (maps) {
       const mm = new Float32Array(res[1]);
       out.maps = { amp: mm.slice(0, n * n), phase: mm.slice(n * n) };
@@ -842,7 +853,7 @@ export class GpuCosmo3D {
   /** Binned P(k) of `field - offset`, same convention as CosmoSim.power_spectrum. */
   async powerSpectrum(field, nbins, deconvolveCic, offset = 0) {
     const a = await this.analyze(field, { nbins, offset });
-    return deconvolveCic ? a.dec : a.plain;
+    return deconvolveCic === 2 ? a.th : deconvolveCic ? a.dec : a.plain;     // window code as in the WASM power_spectrum_w: 0 none, 1 CIC, 2 top-hat
   }
   /** log10|f^|/max and arg f^ in the kz = 0 plane, fft-shifted [ikx*n + iky]. */
   async fourierMaps(field, offset = 0) {

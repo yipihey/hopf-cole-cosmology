@@ -123,6 +123,10 @@ export class Engine {
   /** The exact (clipping-based) sheet deposits: 'sheetx' = P0 (constant per simplex), 'sheetxp1' = P1 (vertex-interpolated). */
   static isExact(which) { return which === 'sheetx' || which === 'sheetxp1'; }
   /** The NUFFT density: the Lagrangian trapezoidal integral of the Fourier-refined map (WASM type-1 NUFFT), see nufft(). */
+  /** Estimators that are cell averages (top-hat window prod sinc(k_a dx / 2) in the spectrum): exact sheet deposits and the Hopf–Cole dual sheet. */
+  static isCellAvg(which) { return Engine.isExact(which) || Engine.isDual(which); }
+  /** WASM/GPU window code for P(k) of `which`: 0 none, 1 CIC (/ prod sinc^4), 2 top-hat cell average (/ prod sinc^2); 0 unless `deconv`. */
+  static windowOf(which, deconv) { return !deconv ? 0 : which === 'cic' ? 1 : Engine.isCellAvg(which) ? 2 : 0; }
   static isNufft(which) { return which === 'nufft'; }
   static isHc(which) { return which === 'hc' || which === 'hcz' || which === 'hcl'; }
   /** The 'dual sheet' variants of the Hopf-Cole fields: the same inverse map q(x), mass-conserving density from the preimage volumes. */
@@ -561,8 +565,9 @@ export class Engine {
       const D = P.D, p0 = this.ref.pk.p;
       const r = new Float64Array(an.cross.k.length);
       for (let i = 0; i < r.length; i++) r[i] = (D * an.cross.p[i]) / Math.sqrt(Math.max(1e-300, an.plain.p[i] * D * D * p0[i]));
-      this.seed(['pk', ...fk, false], an.plain);
-      if (which === 'cic') this.seed(['pk', ...fk, true], an.dec);
+      this.seed(['pk', ...fk, 0], an.plain);
+      if (which === 'cic') this.seed(['pk', ...fk, 1], an.dec);
+      if (Engine.isCellAvg(which)) this.seed(['pk', ...fk, 2], an.th);
       this.seed(['rk', ...fk], { k: an.cross.k, r });
       this.seed(['fmap', ...fk], an.maps);
       this.seed(keyA, 1);
@@ -903,15 +908,15 @@ export class Engine {
 
   get nbins() { return NBINS[this.dim]; }
 
-  /** Binned P(k); CIC is window-deconvolved when deconv is true. */
+  /** Binned P(k); when deconv is true the estimator's own window is divided out (CIC: window 1; exact deposits and dual sheet: top-hat cell average, window 2). */
   pk(which, P, deconv = false) {
-    const dc = which === 'cic' && deconv;
-    return this.memo(['pk', ...this.fieldKey(which, P), dc], () => this.time('P(k)', () => {
+    const win = Engine.windowOf(which, deconv);
+    return this.memo(['pk', ...this.fieldKey(which, P), win], () => this.time('P(k)', () => {
       if (which === 'lin' && this.ref) {       // D^2 P(k) of delta0, from the GPU reference analysis
         const D2 = P.D * P.D, r = this.ref.pk;
         return { k: r.k, p: Float64Array.from(r.p, (v) => v * D2), n: r.n };
       }
-      return unpackSpectrum(this.sim.power_spectrum(this.delta(which, P), this.nbins, dc));
+      return unpackSpectrum(this.sim.power_spectrum_w(this.delta(which, P), this.nbins, win));
     }));
   }
   /** Cross-correlation coefficient r(k) of the named field with the linear field. */

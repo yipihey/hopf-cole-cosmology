@@ -44,6 +44,8 @@ export function makeDefaults(mode = 2) {
     c1: 'inferno', c2: 'magma', c3: 'viridis', c4: 'twilight', l1: true, l2: true,
     // spectra: dm = modes per |k| bin of the direct (deposit-free) sheet spectra, rf = refinement of the NUFFT density (Fourier-refined map)
     dm: 128, rf: 2,
+    // deconvolve the top-hat cell window of the cell-averaged estimators (exact sheet deposits, Hopf–Cole dual sheet) in P(k)
+    dw: true,
     ser: mode === 3 ? ['lin', 'cic', 'sheetp1', 'hc', 'hcdual', 'spt'] : ['lin', 'sheet', 'sheetp1', 'hc', 'hcdual', 'spt'], km: 30,
     // PDFs: top-hat diameter in grid cells
     pd: 10,
@@ -105,6 +107,7 @@ const SCHEMA = [
   ['km', 'km', 'num', [1, 5000]],
   ['dm', 'dm', 'int', [32, 512]],
   ['rf', 'rf', 'enum', [1, 2, 4]],
+  ['dw', 'dw', 'bool'],
   ['pd', 'pd', 'int', [2, 64]],
   ['sref', 'lr', 'str', ['plain', 'p1', 'x', 'xp1', 'nu']],
 ];
