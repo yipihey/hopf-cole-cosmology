@@ -1,6 +1,6 @@
 title: quadrant
 author: Tom Abel
-version: 0.1.0
+version: 0.1.2
 quarto-required: ">=1.6.0"
 contributes:
   shortcodes:

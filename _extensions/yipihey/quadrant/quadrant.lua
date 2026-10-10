@@ -22,11 +22,12 @@ local function offset()
   return off
 end
 
-local function exists(path)
+local function exists_abs(path)
   local f = io.open(path, "r")
   if f then f:close() return true end
   return false
 end
+local function exists(path) return exists_abs(path) end
 
 local function split(s, sep)
   local out = {}
@@ -42,18 +43,35 @@ local function list_dir(path)
   return {}
 end
 
+-- Project root (file checks run from here: Quarto renders each document with its own directory as cwd).
+local function project_root()
+  local d = quarto.project and quarto.project.directory or nil
+  if d and d ~= "" then return d end
+  return "."
+end
+
+-- Paths in the configuration are relative to the project root. Quarto rewrites path-like metadata relative to each
+-- document (`api` becomes `../api` for a chapter in chapters/), so leading ./ and ../ segments are stripped.
+local function canon(path)
+  path = path:gsub("^%./", "")
+  while path:sub(1, 3) == "../" do path = path:sub(4) end
+  return (path:gsub("/$", ""))
+end
+
 local function conf(meta, key, default)
   local q = meta and meta["quadrant"]
-  if q and q[key] then return pandoc.utils.stringify(q[key]) end
+  if q and q[key] then return canon(pandoc.utils.stringify(q[key])) end
   return default
 end
+
+local function abs(rel) return project_root() .. "/" .. rel end
 
 local function crate_name(meta)
   local c = conf(meta, "crate", nil)
   if c then return c end
   local api = conf(meta, "api", "api")
-  for _, e in ipairs(list_dir(api)) do
-    if e ~= "static.files" and e ~= "src" and exists(api .. "/" .. e .. "/index.html") then return e end
+  for _, e in ipairs(list_dir(abs(api))) do
+    if e ~= "static.files" and e ~= "src" and exists(abs(api .. "/" .. e .. "/index.html")) then return e end
   end
   return "core"
 end
@@ -64,6 +82,7 @@ end
 
 -- Resolve a Rust path to a rustdoc page (relative to the project root).
 local function resolve_src(root, path)
+  local exists = function(rel) return exists_abs(abs(rel)) end
   local parts = split(path, ":")
   local n = #parts
   if n == 0 then return nil end
@@ -118,9 +137,9 @@ end
 
 -- Find which test file defines `fn <name>(`.
 local function find_test(dir, name)
-  for _, e in ipairs(list_dir(dir)) do
+  for _, e in ipairs(list_dir(abs(dir))) do
     if e:match("%.rs$") then
-      local h = io.open(dir .. "/" .. e, "r")
+      local h = io.open(abs(dir .. "/" .. e), "r")
       if h then
         local body = h:read("*a"); h:close()
         if body:find("fn%s+" .. name .. "%s*%(") then return dir .. "/" .. e end
@@ -148,6 +167,10 @@ local function test(args, kwargs, meta)
   if not file then quarto.log.warning("quadrant test: no test named " .. name .. " under " .. dir); file = dir end
   local repo = repo_url(meta)
   local branch = meta["repo-branch"] and pandoc.utils.stringify(meta["repo-branch"]) or (meta.book and meta.book["repo-branch"] and pandoc.utils.stringify(meta.book["repo-branch"])) or "main"
+  -- repo-subdir (Quarto's own key for projects that live in a subdirectory of the repository)
+  local sub = meta["repo-subdir"] and pandoc.utils.stringify(meta["repo-subdir"]) or (meta.book and meta.book["repo-subdir"] and pandoc.utils.stringify(meta.book["repo-subdir"])) or ""
+  sub = sub:gsub("^/", ""):gsub("/$", "")
+  if sub ~= "" then file = sub .. "/" .. file end
   local href = repo .. "/blob/" .. branch .. "/" .. file .. "#:~:text=fn%20" .. name
   local title = "Verified by the test `" .. name .. "` in " .. file
   return pandoc.RawInline("html", '<a class="qd-test" href="' .. href .. '" title="' .. title .. '">' .. label .. '</a>')
