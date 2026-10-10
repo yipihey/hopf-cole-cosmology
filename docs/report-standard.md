@@ -17,7 +17,7 @@ chapters/    narrative (Quarto book chapters), references.bib, notation.qmd, sta
 core/        the numerical core: a tested library (Rust by default) compiled to WebAssembly
 app/         the standalone laboratory and the chapter widgets (plain ES modules, no bundler)
 docs/        decisions, audits, this standard
-_extensions/hcc/   the Quarto extension: provenance and lab shortcodes, their CSS
+_extensions/yipihey/quadrant/   the Quarto extension: provenance and lab shortcodes, their CSS
 scripts/     build_info.py, brand_to_css.py, check_links.py, serve.py
 .github/workflows/publish.yml   build core → docs → check → render → deploy
 ```
