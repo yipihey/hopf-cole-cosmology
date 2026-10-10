@@ -19,7 +19,8 @@ motivated the format is `docs/format-audit.md`.
   `app/js/lab/state.js`; presets in `app/js/lab/presets.js`; explain notes in
   `app/js/lab/explain.js`; panel catalog with captions and `doc` back-links in
   `app/js/lab/catalog.js`; shared interactive plot in `app/js/viz/plot.js`.
-- `_extensions/hcc/` shortcodes `{{< src >}}`, `{{< test >}}`, `{{< lab >}}`.
+- `_extensions/yipihey/quadrant/` shortcodes `{{< src >}}`, `{{< test >}}`, `{{< lab >}}`
+  (the quadrant extension, https://github.com/yipihey/quadrant; configured under `quadrant:` in `_quarto.yml`).
 - `make wasm api check site test`; `python3 scripts/serve.py 8790 _site` for a
   no-cache dev server; `rsync -a app/ _site/app/` to refresh the app copy
   without re-rendering.

@@ -1,0 +1,12 @@
+/* quadrant extension: provenance links and lab deep links */
+sup.qd-src { font-size: 0.68em; line-height: 0; margin-left: 0.15em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+sup.qd-src a { color: inherit; opacity: 0.55; text-decoration: none; border-bottom: 1px dotted currentColor; }
+sup.qd-src a:hover { opacity: 1; border-bottom-style: solid; }
+sup.qd-src a::before { content: "⟨"; opacity: 0.7; }
+sup.qd-src a::after { content: "⟩"; opacity: 0.7; }
+a.qd-test { display: inline-block; font-size: 0.72em; line-height: 1.4; vertical-align: 0.15em; margin-left: 0.25em; padding: 0 0.4em; border: 1px solid currentColor; border-radius: 3px; opacity: 0.6; text-decoration: none; color: inherit; white-space: nowrap; }
+a.qd-test:hover { opacity: 1; }
+a.qd-test::before { content: "✓ "; }
+a.qd-lab { display: inline-block; margin: 0.35rem 0.4rem 0.1rem 0; padding: 0.2rem 0.65rem; border: 1px solid var(--bs-primary, #0072b2); border-radius: 4px; color: var(--bs-primary, #0072b2); text-decoration: none; font-size: 0.9em; }
+a.qd-lab:hover { background: var(--bs-primary, #0072b2); color: #fff; }
+a.qd-lab::before { content: "⚗ "; }

@@ -1,6 +1,7 @@
 # Interactive scientific report: the standard
 
-Version 0.1, 2026-10-09. This document specifies the format that the
+Version 0.1, 2026-10-09. Maintained as the README of https://github.com/yipihey/quadrant; this copy is the
+snapshot the book was built from. This document specifies the format that the
 Hopf–Cole Cosmology book follows and that new reports should follow. The
 companion skill (`.claude/skills/interactive-report/SKILL.md`) tells an agent
 how to work inside it; `docs/format-audit.md` records why these choices were

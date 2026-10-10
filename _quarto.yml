@@ -10,6 +10,13 @@ project:
     - api/**
     - notebooks/*.ipynb
 
+# quadrant (https://github.com/yipihey/quadrant): where the provenance shortcodes src/test/lab look things up
+quadrant:
+  crate: hcc_core
+  api: api
+  tests: core/tests
+  app: app/index.html
+
 book:
   title: "Hopf–Cole Cosmology"
   subtitle: "From Burgers' equation to the cosmic web, in your browser"
